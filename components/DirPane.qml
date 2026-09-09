@@ -98,6 +98,12 @@ Rectangle {
     pane.filter = ""
     filterInput.text = ""
     pane.filtering = false
+    // Leaving the editor open across a navigation showed a field holding the
+    // path you *came from* while the pane listed somewhere else -- and typing
+    // was the only way back to a breadcrumb. It was cleared on the one route
+    // that commits a typed path and on none of the five others that set `dir`,
+    // which is exactly why this gate exists.
+    pane.editingPath = false
     if (pane.dir !== "") pane.spaceWanted(pane.dir)
   }
 
