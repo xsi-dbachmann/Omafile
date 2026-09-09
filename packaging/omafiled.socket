@@ -1,6 +1,6 @@
 [Unit]
 Description=Omafile transfer engine socket
-Documentation=https://github.com/xsi-dbachmann/omafile/blob/release/docs/adr/0005-daemon-as-a-systemd-user-unit.md
+Documentation=https://github.com/xsi-dbachmann/Omafile/blob/release/docs/adr/0005-daemon-as-a-systemd-user-unit.md
 
 [Socket]
 # %t is $XDG_RUNTIME_DIR for a user unit, which is where the daemon's own

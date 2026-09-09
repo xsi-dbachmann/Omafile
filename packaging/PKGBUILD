@@ -16,7 +16,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Omafile's transfer engine: every file is committed by atomic rename, or not at all"
 arch=('x86_64' 'aarch64')
-url="https://github.com/xsi-dbachmann/omafile"
+url="https://github.com/xsi-dbachmann/Omafile"
 license=('MIT')
 depends=('gcc-libs' 'glibc')
 makedepends=('cargo')
@@ -24,7 +24,12 @@ makedepends=('cargo')
 # built and only the daemon is packaged; the plugin is installed by
 # `omarchy plugin add`, never by this.
 _tag="daemon-v$pkgver"
-_srcdir="omafile-${_tag}"
+# Derived from `url`, never written twice. GitHub's tag tarball extracts to a
+# directory named after the repository's CANONICAL casing -- `Omafile-<tag>`,
+# not `omafile-<tag>` -- and URL navigation being case-insensitive hides that
+# until the build cd's into a directory that is not there.
+_repo="${url##*/}"
+_srcdir="${_repo}-${_tag}"
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$_tag.tar.gz")
 sha256sums=('SKIP')
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Omafile transfer engine
-Documentation=https://github.com/xsi-dbachmann/omafile/blob/release/docs/adr/0005-daemon-as-a-systemd-user-unit.md
+Documentation=https://github.com/xsi-dbachmann/Omafile/blob/release/docs/adr/0005-daemon-as-a-systemd-user-unit.md
 Requires=omafiled.socket
 After=omafiled.socket
 

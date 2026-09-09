@@ -120,7 +120,7 @@ serving it; only one that refuses the connection is stale enough to clear.
 Two halves on two cadences (ADR 0006). The plugin arrives through Omarchy:
 
 ```bash
-omarchy plugin add https://github.com/xsi-dbachmann/omafile
+omarchy plugin add https://github.com/xsi-dbachmann/Omafile
 ```
 
 The engine is an Arch package built from this repository. Enabling its socket
@@ -180,12 +180,32 @@ Symlinking the plugin *directory itself* is the sanctioned workflow — Omarchy
 refuses symlinks *inside* a plugin folder, but walks the plugins directory with
 `find -L`.
 
-To remove it:
+## Removing it
+
+Both halves, in this order. Removing only the plugin leaves a daemon installed
+and a socket unit still listening.
 
 ```bash
+# 1. the plugin
 omarchy plugin disable io.github.xsi-dbachmann.omafile
 omarchy plugin remove io.github.xsi-dbachmann.omafile
+
+# 2. the engine — stop it listening before removing the binary
+systemctl --user disable --now omafiled.socket
+sudo pacman -R omafiled
 ```
+
+That leaves two files behind on purpose, because neither is Omafile's to
+discard silently:
+
+```bash
+rm -f  ~/.config/omafile/settings.json    # the checksum default, nothing else
+rm -rf ~/.local/state/omafile             # the journal
+```
+
+**Check the journal before deleting it.** It records transfers that never
+finished, and it is what lets an interrupted one resume — `omafiled unfinished`
+prints anything still in it. On a clean shutdown it is empty.
 
 ## A note for anyone editing the window
 
