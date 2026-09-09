@@ -1,0 +1,18 @@
+[package]
+name = "omafiled"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Omafile's transfer engine: every file is committed by atomic rename, or not at all."
+
+[dependencies]
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+# Also a normal dependency, but an integration test links the crate under test
+# and not its dependencies, and `tests/activation.rs` needs dup2 and fcntl.
+libc = "0.2"

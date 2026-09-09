@@ -1,0 +1,36 @@
+[Unit]
+Description=Omafile transfer engine
+Documentation=https://github.com/xsi-dbachmann/omafile/blob/release/docs/adr/0005-daemon-as-a-systemd-user-unit.md
+Requires=omafiled.socket
+After=omafiled.socket
+
+[Service]
+# Type=exec, not notify: the daemon sends no sd_notify, and claiming otherwise
+# would have systemd wait for a readiness message that never arrives.
+Type=exec
+ExecStart=/usr/bin/omafiled serve
+
+# Started by the first connection and then it stays, until the user session
+# ends. Deliberately no idle timeout: the Job registry lives in this process's
+# memory, and a reconnecting plugin builds its picture from that registry — so
+# an idle exit would hand an open window an empty snapshot for Jobs it is still
+# waiting to hear about. That is the failure issues 22 and 24 closed.
+#
+# Restart=no on purpose too. A crashed daemon is brought back by the next
+# client connection, which is the activation path itself; a restart loop would
+# only race the socket unit's own trigger limit.
+Restart=no
+
+# The one hardening option that costs nothing here.
+NoNewPrivileges=yes
+
+# What is deliberately absent: ProtectSystem, ProtectHome, PrivateTmp,
+# ReadOnlyPaths, RestrictSUIDSGID. This daemon exists to copy the user's files
+# from anywhere they can read to anywhere they can write — mounts, /tmp, other
+# users' shared directories, a setuid binary being backed up. Every one of
+# those options would turn a supported transfer into a permission error at the
+# worst possible moment, and the daemon holds no privilege the user does not
+# already have.
+
+# No [Install] section: this unit is reached through omafiled.socket. Enabling
+# it directly would start a daemon before anybody asked for one.

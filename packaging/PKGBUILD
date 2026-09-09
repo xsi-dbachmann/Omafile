@@ -1,0 +1,62 @@
+# Maintainer: Daniel Bachmann <xsi.dbachmann@gmail.com>
+
+# Omafile ships as two artefacts on two cadences (ADR 0006): the plugin through
+# git, and this — the daemon, its socket unit, and its service — through the
+# AUR. `pkgver` is `daemon/Cargo.toml`'s version, which is also what the daemon
+# reports on connect (`DAEMON_VERSION` is `env!("CARGO_PKG_VERSION")`), and the
+# tag it is built from is `daemon-v$pkgver`. The plugin's own version in
+# manifest.json moves independently and is not related to this number.
+#
+# Compatibility is decided by neither of them: the wire protocol carries its own
+# version, and that is the only thing the plugin refuses on. See
+# daemon/src/protocol.rs.
+
+pkgname=omafiled
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Omafile's transfer engine: every file is committed by atomic rename, or not at all"
+arch=('x86_64' 'aarch64')
+url="https://github.com/xsi-dbachmann/omafile"
+license=('MIT')
+depends=('gcc-libs' 'glibc')
+makedepends=('cargo')
+# The tag carries the whole repository, the QML half included. Only daemon/ is
+# built and only the daemon is packaged; the plugin is installed by
+# `omarchy plugin add`, never by this.
+_tag="daemon-v$pkgver"
+_srcdir="omafile-${_tag}"
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$_tag.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$_srcdir/daemon"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+  cd "$_srcdir/daemon"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  # Not ceremony. This package's entire claim is that a transfer either
+  # committed or did not, and the suite is what holds that claim up.
+  cd "$_srcdir/daemon"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen --release
+}
+
+# Deliberately not packaged: the polkit policy and mount helper of ADR 0007.
+# That ADR is unreviewed, and an installed policy beside an unreviewed helper is
+# a privilege-escalation surface. This package is the daemon, its socket and its
+# service — nothing that runs as anyone but the user.
+package() {
+  cd "$_srcdir"
+  install -Dm0755 "daemon/target/release/omafiled" "$pkgdir/usr/bin/omafiled"
+  install -Dm0644 "packaging/omafiled.socket" "$pkgdir/usr/lib/systemd/user/omafiled.socket"
+  install -Dm0644 "packaging/omafiled.service" "$pkgdir/usr/lib/systemd/user/omafiled.service"
+  install -Dm0644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

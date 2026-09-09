@@ -1,0 +1,20 @@
+[Unit]
+Description=Omafile transfer engine socket
+Documentation=https://github.com/xsi-dbachmann/omafile/blob/release/docs/adr/0005-daemon-as-a-systemd-user-unit.md
+
+[Socket]
+# %t is $XDG_RUNTIME_DIR for a user unit, which is where the daemon's own
+# default_socket_path() looks. The two must agree: the plugin connects to a
+# fixed path and never spawns anything.
+#
+# Never anywhere under ~/.config/omarchy/plugins/ — a write there makes the
+# shell tear down every plugin (ADR 0005).
+ListenStream=%t/omafiled.sock
+
+# Anyone who can open this socket can move and delete the user's files with it.
+# $XDG_RUNTIME_DIR is already 0700; this says so at the socket as well rather
+# than inheriting the guarantee from a directory somebody may relax.
+SocketMode=0600
+
+[Install]
+WantedBy=sockets.target
