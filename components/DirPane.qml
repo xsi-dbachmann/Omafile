@@ -405,6 +405,31 @@ Rectangle {
     return n
   }
 
+  /// Whether this pane is holding a selection the controls can see.
+  ///
+  /// The action bar arms on `selectedFileCount()` and `containsDir` -- App.qml
+  /// passes it exactly those two -- and both count the **visible** rows. The
+  /// header used to choose its form and its colour from `selection.length`,
+  /// which is the raw list of names and includes files the filter has taken off
+  /// screen. Two expressions of one fact, and on 2026-09-09 they disagreed in
+  /// the same frame: the header lit accent and read `0 files of 0` three rows
+  /// above a bar reading `Nothing selected` (issue 09). Named once here so they
+  /// cannot drift apart again.
+  readonly property bool showsSelection: pane.selectedFileCount() > 0 || pane.containsDir
+
+  /// Picked names the filter has taken off screen.
+  ///
+  /// The selection survives a filter -- it is a list of names, not of rows --
+  /// so this is the count that makes `showsSelection` false while the pane is
+  /// still holding something. The filter strip says it; see
+  /// `Wording::filterPhrase()` for why it is said there and not in the header.
+  readonly property int hiddenPicked: {
+    var n = 0
+    for (var i = 0; i < pane.selection.length; i++)
+      if (pane.indexOfName(pane.selection[i]) === -1) n++
+    return n
+  }
+
   /// The single file an act-on-one action would act on, or "".
   ///
   /// "Exactly one thing is picked" is not `selectedFileCount() === 1`: a file
@@ -807,7 +832,7 @@ Rectangle {
       text: {
         var files = pane.count - pane.dirCount
         var picked = pane.selectedFileCount()
-        if (pane.selection.length > 0)
+        if (pane.showsSelection)
           return picked + " file" + (picked === 1 ? "" : "s") + " of " + files
                  + (pane.containsDir ? " · folder picked" : "")
         return files + " file" + (files === 1 ? "" : "s")
@@ -815,7 +840,7 @@ Rectangle {
                   ? ", " + pane.dirCount + " folder" + (pane.dirCount === 1 ? "" : "s")
                   : "")
       }
-      color: pane.selection.length > 0 ? Color.accent : Color.muted
+      color: pane.showsSelection ? Color.accent : Color.muted
       font.pixelSize: 11
     }
   }
@@ -908,7 +933,11 @@ Rectangle {
       // Files, not rows: `nameFilters` never applied to the folders, so counting
       // them here claimed the filter had chosen a row it had ignored. See
       // `Wording::filterPhrase()` for why the folders stay on screen at all.
-      text: pane.wording.filterPhrase(pane.count - pane.dirCount)
+      // 420 is the width `freeText` above already yields at, so a pane narrow
+      // enough to drop the free-space figure is narrow enough to drop the
+      // duplicated match count too. See `Wording::filterPhrase()`.
+      text: pane.wording.filterPhrase(pane.count - pane.dirCount, pane.hiddenPicked,
+                                      pane.width > 420)
       color: Color.muted
       font.pixelSize: 11
     }

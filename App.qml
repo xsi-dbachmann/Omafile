@@ -1032,7 +1032,7 @@ Item {
   ///
   /// The cost is one fact in two places, so `scripts/lint-qml.sh` asserts this
   /// equals `manifest.json`.
-  readonly property string appVersion: "1.3.0"
+  readonly property string appVersion: "1.3.1"
 
   readonly property var daemonBanner: {
     if (daemon.canTransfer)

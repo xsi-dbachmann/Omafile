@@ -102,3 +102,71 @@ fn paths_with_awkward_characters_survive_a_round_trip() {
     assert_eq!(fs::read(&back).unwrap(), b"awkward");
     assert!(back.to_string_lossy().contains("100% done #1.txt"));
 }
+
+/// A `.trashinfo` this daemon did not write.
+///
+/// `Restore` is a socket request and names its own info file, and the
+/// FreeDesktop trash is a directory shared with every other tool on the
+/// machine. Our `uri_escape` escapes every byte that is not unreserved, so a
+/// record *we* wrote can never carry a bare `%`; a tool that escapes less can,
+/// and a name like `50%日本.txt` puts a multi-byte character directly after
+/// one. `%` followed by something that is not two hex digits is not an escape,
+/// so it must come back through unchanged rather than take the daemon with it.
+#[test]
+fn a_trashinfo_from_another_tool_does_not_bring_the_daemon_down() {
+    let home = tempfile::tempdir().unwrap();
+    let files = home.path().join("Trash/files");
+    let info_dir = home.path().join("Trash/info");
+    fs::create_dir_all(&files).unwrap();
+    fs::create_dir_all(&info_dir).unwrap();
+
+    let trashed_as = files.join("odd.txt");
+    fs::write(&trashed_as, b"came from somewhere else").unwrap();
+
+    let dest = home.path().join("50%日本.txt");
+    let info = info_dir.join("odd.txt.trashinfo");
+    fs::write(
+        &info,
+        format!(
+            "[Trash Info]\nPath={}\nDeletionDate=2026-09-09T12:00:00\n",
+            dest.display()
+        ),
+    )
+    .unwrap();
+
+    let back = trash::restore(&trashed_as, &info).unwrap();
+    assert_eq!(back, dest, "the name must survive a % that is not an escape");
+    assert_eq!(fs::read(&dest).unwrap(), b"came from somewhere else");
+}
+
+/// Two hex digits, and nothing else, is an escape.
+///
+/// `%+1` used to come back as the byte 0x01, because `u8::from_str_radix`
+/// accepts a leading sign — measured: `from_str_radix("+1", 16)` is `Ok(1)`.
+/// The spec has no such escape, so those three characters are part of the name.
+/// `%41` is a real one and still decodes.
+#[test]
+fn only_two_hex_digits_are_an_escape() {
+    let home = tempfile::tempdir().unwrap();
+    let files = home.path().join("Trash/files");
+    let info_dir = home.path().join("Trash/info");
+    fs::create_dir_all(&files).unwrap();
+    fs::create_dir_all(&info_dir).unwrap();
+
+    let trashed_as = files.join("odd.txt");
+    fs::write(&trashed_as, b"back where it belongs").unwrap();
+
+    let info = info_dir.join("odd.txt.trashinfo");
+    fs::write(
+        &info,
+        format!(
+            "[Trash Info]\nPath={}/keep %+1 %zz %41.txt\nDeletionDate=2026-09-09T12:00:00\n",
+            home.path().display()
+        ),
+    )
+    .unwrap();
+
+    let back = trash::restore(&trashed_as, &info).unwrap();
+    assert_eq!(back, home.path().join("keep %+1 %zz A.txt"));
+    assert_eq!(fs::read(&back).unwrap(), b"back where it belongs");
+}

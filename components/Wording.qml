@@ -289,10 +289,38 @@ QtObject {
   /// you could not see what you were typing. That is ADR 0014's collision
   /// exactly, in a second control. A sentence in a shared line is charged to
   /// whatever shares it.
-  function filterPhrase(fileCount) {
+  /// The filter strip's right-hand count, and what the filter is hiding that the
+  /// user had already picked.
+  ///
+  /// A picked file taken off screen is the one thing the filter hides that has
+  /// consequences: the selection is a list of names, not of rows, so it survives
+  /// the filter. **Watched**: a file picked, then filtered out, leaves the bar
+  /// reading `Nothing selected` with every control dark -- and clearing the
+  /// filter brings back `1 file selected`, armed. From there it follows, since
+  /// `DirPane::toggle()` appends where `selectOnly()` replaces, that picking
+  /// more files while the filter is up adds to what is already held: pick five,
+  /// filter, `Ctrl+click` two, clear the filter, and Copy acts on seven
+  /// (issue 09).
+  ///
+  /// **`roomy` is not a nicety, and the first version of this was watched
+  /// failing.** The strip shares its width with its own TextInput, and at the
+  /// 720 minimum a 245px pane leaves the two of them about 169px between them.
+  /// `0 files match · 1 picked hidden` is ~160 of it, and the field you are
+  /// typing in was clipped to `:zz` -- ADR 0014's rule firing for the third
+  /// time in this repository.
+  ///
+  /// So when the row is narrow the **match count** is what goes, because it is
+  /// the half that is said twice: the pane header a row above already reads
+  /// `0 files, 7 folders` while filtering, and that file count *is* the match
+  /// count. The clause that only exists here is the one that stays.
+  function filterPhrase(fileCount, hiddenPicked, roomy) {
     var f = Number(fileCount)
     if (!isFinite(f) || f < 0) return ""
-    return f + (f === 1 ? " file matches" : " files match")
+    var matched = f + (f === 1 ? " file matches" : " files match")
+    var h = Number(hiddenPicked)
+    if (!isFinite(h) || h <= 0) return matched
+    var hidden = h + " picked hidden"
+    return roomy ? matched + " · " + hidden : hidden
   }
 
   /// How long a notice stays on screen, in milliseconds (issue 19 item 3).

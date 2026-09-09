@@ -177,14 +177,26 @@ fn uri_escape(s: &str) -> String {
     out
 }
 
+/// The inverse, and it must not trust what it is reading.
+///
+/// `restore` is a socket request that names its own `.trashinfo`, and a trash
+/// directory is shared with every other tool on the machine. A record *we* wrote
+/// can never carry a bare `%` -- `uri_escape` above escapes every byte that is
+/// not unreserved -- but a tool that escapes less can, and a name like
+/// `50%日本.txt` puts a multi-byte character directly after one.
+///
+/// This walks **bytes**. The previous version reached for `&s[i + 1..i + 3]`,
+/// which slices a `str` by byte index, and on that name those indices land
+/// inside the `日`: *end byte index 21 is not a char boundary* -- a panic in the
+/// process that is holding somebody's transfer open.
 fn uri_unescape(s: &str) -> String {
     let b = s.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
+            if let (Some(hi), Some(lo)) = (hex_digit(b[i + 1]), hex_digit(b[i + 2])) {
+                out.push(hi * 16 + lo);
                 i += 3;
                 continue;
             }
@@ -193,6 +205,20 @@ fn uri_unescape(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// One hex digit, or nothing.
+///
+/// Spelled out rather than left to `u8::from_str_radix`, which also accepts a
+/// leading sign: it read `%+1` as the byte 0x01, where the spec has no such
+/// escape and those two characters belong in the name unchanged.
+fn hex_digit(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// `YYYY-MM-DDThh:mm:ss` in local time, as the spec asks.

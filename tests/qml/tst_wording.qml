@@ -336,4 +336,37 @@ TestCase {
     compare(w.filterPhrase(undefined), "")
     compare(w.filterPhrase(-1), "")
   }
+
+  /// Issue 09. The strip stays on screen to say what is being hidden, and a
+  /// picked file taken off screen is the one thing it hides that has
+  /// consequences: the selection survives the filter, so clearing it arms the
+  /// file again.
+  function test_filter_says_when_it_has_hidden_something_picked() {
+    compare(w.filterPhrase(0, 1, true), "0 files match · 1 picked hidden")
+    compare(w.filterPhrase(3, 2, true), "3 files match · 2 picked hidden")
+    compare(w.filterPhrase(1, 5, true), "1 file matches · 5 picked hidden")
+  }
+
+  /// Watched failing at 720x600 before this existed: `0 files match · 1 picked
+  /// hidden` left the TextInput beside it about 9px and clipped `zzz` to `:zz`.
+  /// The match count is the half that goes, because the header a row above is
+  /// already reporting the same number.
+  function test_filter_gives_up_the_count_before_the_field_it_shares_with() {
+    compare(w.filterPhrase(0, 1, false), "1 picked hidden")
+    compare(w.filterPhrase(3, 2, false), "2 picked hidden")
+    // Nothing picked is hidden, so there is nothing to trade and the narrow
+    // row reads exactly as the wide one does.
+    compare(w.filterPhrase(3, 0, false), "3 files match")
+  }
+
+  /// The clause is absent, not zeroed. This row shares its width with its own
+  /// TextInput, which a longer count squeezed to nothing once already
+  /// (ADR 0014), so the common case must cost no characters at all.
+  function test_filter_hiding_nothing_reads_exactly_as_it_did() {
+    compare(w.filterPhrase(4, 0, true), "4 files match")
+    compare(w.filterPhrase(4), "4 files match")
+    compare(w.filterPhrase(4, undefined, true), "4 files match")
+    compare(w.filterPhrase(4, "nonsense", true), "4 files match")
+    compare(w.filterPhrase(4, -2, true), "4 files match")
+  }
 }

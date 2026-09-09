@@ -16,12 +16,18 @@
 #   3. Warnings fail the run. The Qt 6 linter exits 0 with warnings present, so
 #      the exit code alone is not a gate — the output is inspected.
 #
+# A fourth was added on 2026-09-09, after this script reported `clean` on a file
+# the engine refused to load: `qmlcachegen` compiles every file as well. See the
+# block at the bottom for what each of the two tools catches and what it does
+# not.
+#
 # Quickshell's `qs.*` modules live in the shell tree, so the linter needs an
 # import root containing a `qs` directory. Without it every `Color.*` reference
 # is reported as unqualified access and the output is worse than useless.
 set -euo pipefail
 
 QMLLINT=/usr/lib/qt6/bin/qmllint
+QMLCACHEGEN=/usr/lib/qt6/qmlcachegen
 SHELL_QML="${OMARCHY_PATH:-/usr/share/omarchy}/shell"
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -34,6 +40,24 @@ version="$("$QMLLINT" --version 2>&1)"
 [[ $version == *"qmllint 6."* ]] || {
   printf 'lint-qml: expected the Qt 6 linter, got "%s" from %s.\n' "$version" "$QMLLINT" >&2
   printf 'lint-qml: Qt 5 qmllint reports nothing and passes everything — refusing to pretend.\n' >&2
+  exit 2
+}
+
+[[ -x $QMLCACHEGEN ]] || {
+  printf 'lint-qml: %s is missing. Install qt6-declarative.\n' "$QMLCACHEGEN" >&2
+  exit 2
+}
+
+# Asserted for a reason that is not hypothetical: bare `qmlcachegen` on this
+# machine is /usr/bin/qmlcachegen, which is **Qt 5's** (qt5-declarative). It does
+# not understand `--only-bytecode`, prints `Unknown option 'only-bytecode'` — and
+# exits **0**. That is the same silent pass qmllint's absolute path exists to
+# stop, waiting for the second tool.
+cachegen_version="$("$QMLCACHEGEN" --version 2>&1 | head -1)"
+[[ $cachegen_version == *"qmlcachegen 6."* ]] || {
+  printf 'lint-qml: expected the Qt 6 compiler, got "%s" from %s.\n' \
+    "$cachegen_version" "$QMLCACHEGEN" >&2
+  printf 'lint-qml: Qt 5 qmlcachegen rejects --only-bytecode and exits 0 — refusing to pretend.\n' >&2
   exit 2
 }
 
@@ -318,4 +342,51 @@ if (( n > 0 )); then
   exit 1
 fi
 
-printf 'lint-qml: clean (%s, %s files).\n' "$version" "$(ls App.qml components/*.qml | wc -l)"
+# A clean lint is not evidence that a component LOADS.
+#
+# `DirPane.qml` was given a second `onDirChanged` on 2026-09-09 while it already
+# had one. This script printed `clean (qmllint 6.11.2, 25 files)`. The failure
+# appeared only once quickshell loaded the file:
+#
+#     DirPane.qml[590:3]: Property value set multiple times
+#     App.qml[1388:7]:    Type DirPane unavailable
+#
+# — a window with two empty columns where the panes should be. The ghost was the
+# only thing in this repository that actually loaded the QML, and it is not what
+# anyone runs before committing.
+#
+# `qmlcachegen` compiles each document to bytecode, which is the pass that
+# rejects it, and it needs no display, no quickshell and no resolvable imports:
+# `qs.Commons` is irrelevant to it because it is checking the structure of the
+# document rather than the types in it. 0.4 s for the whole tree.
+#
+# **The two tools are complementary and neither is sufficient.** Measured on a
+# battery of ten deliberately broken files, scoring qmllint by the same
+# diagnostic count this script gates on:
+#
+#   qmllint only        an unknown type; an unknown property; a write to a
+#                       readonly property; a missing import; `anchors.left` and
+#                       an `anchors { }` block assigning the same anchor
+#   both                a syntax error; an id starting uppercase; a duplicate
+#                       property NAME; one property bound twice
+#   qmlcachegen only    a duplicate SIGNAL HANDLER — the defect above — and an
+#                       `id:` written twice on one object
+#
+# So this runs after the linter rather than instead of it, and the output is
+# every file that fails rather than the first, because a bad edit usually lands
+# in one file but the next reader wants the whole list.
+compile_errs=""
+for qf in App.qml components/*.qml; do
+  msg="$("$QMLCACHEGEN" --only-bytecode -o "$shim/compiled.qmlc" "$qf" 2>&1)" && continue
+  compile_errs+="${msg#Error compiling qml file: }"$'\n'
+done
+if [[ -n $compile_errs ]]; then
+  printf '%s' "$compile_errs"
+  printf 'lint-qml: the above will not LOAD, whatever the linter said about it.\n' >&2
+  printf 'lint-qml: quickshell reports this as "Type <Component> unavailable" at the USE site,\n' >&2
+  printf 'lint-qml: which names a file with nothing wrong in it. The error above names the real one.\n' >&2
+  exit 1
+fi
+
+printf 'lint-qml: clean (%s + %s, %s files).\n' \
+  "$version" "$cachegen_version" "$(ls App.qml components/*.qml | wc -l)"
