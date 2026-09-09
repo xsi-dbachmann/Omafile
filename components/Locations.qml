@@ -25,6 +25,13 @@ Rectangle {
   // Where the panes have actually been this session. Nothing about a session
   // outlives it here, so this is a list in memory, not a setting.
   property var recent: []
+  /// Folders the user pinned, newest first. Held by the window and persisted;
+  /// this component only draws them and says when one should go.
+  property var pinned: []
+  /// Passed to the tree so a hidden folder is not silently missing from it
+  /// while the panes are showing hidden files.
+  property bool showHidden: false
+  signal unpinned(string path)
 
   // Below this the sidebar cannot show seven places *and* the shares, and the
   // shares are the reason the product exists — so Places collapses to a
@@ -182,6 +189,60 @@ Rectangle {
       bottomPadding: 8
       spacing: 0
 
+      /// Pinned first, because a place somebody chose outranks one this
+      /// program guessed. Absent entirely when empty rather than an empty
+      /// heading: a section title over nothing is a promise of a feature the
+      /// user has not used yet.
+      Text {
+        x: 14
+        visible: locations.pinned.length > 0
+        text: "Pinned"
+        color: Color.muted
+        font.pixelSize: 10
+        font.bold: true
+        bottomPadding: 4
+      }
+
+      Repeater {
+        model: locations.pinned
+        Rectangle {
+          id: pin
+          required property string modelData
+          width: content.width
+          height: 26
+          color: locations.currentDir === pin.modelData
+            ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.16)
+            : (pinHov.hovered ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.06)
+                              : "transparent")
+          Text {
+            anchors { verticalCenter: parent.verticalCenter; left: parent.left
+                      leftMargin: 14; right: dropPin.left; rightMargin: 6 }
+            // The tail, not the head: pinned folders are deep, and their last
+            // segment is what distinguishes them. Eliding from the right would
+            // leave a column of identical prefixes.
+            elide: Text.ElideLeft
+            text: pin.modelData.substring(pin.modelData.lastIndexOf("/") + 1) || "/"
+            color: locations.currentDir === pin.modelData ? Color.accent : Color.foreground
+            font.pixelSize: 12
+          }
+          /// Only under the pointer. A row of × marks reads as a list of things
+          /// about to be deleted.
+          Text {
+            id: dropPin
+            anchors { verticalCenter: parent.verticalCenter; right: parent.right; rightMargin: 10 }
+            visible: pinHov.hovered
+            text: "×"
+            color: Color.muted
+            font.pixelSize: 13
+            TapHandler { onSingleTapped: locations.unpinned(pin.modelData) }
+          }
+          HoverHandler { id: pinHov }
+          TapHandler { onSingleTapped: locations.chosen(pin.modelData) }
+        }
+      }
+
+      Item { width: 1; height: locations.pinned.length > 0 ? 10 : 0 }
+
       Text {
         x: 14
         text: "Places"
@@ -191,28 +252,18 @@ Rectangle {
         bottomPadding: 4
       }
 
-      Repeater {
-        model: locations.shownPlaces
-        Rectangle {
-          id: place
-          required property var modelData
-          width: content.width
-          height: 26
-          color: locations.currentDir === modelData.path
-            ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.16)
-            : (hov.hovered ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.06)
-                           : "transparent")
-          Text {
-            anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 14; right: parent.right; rightMargin: 10 }
-            elide: Text.ElideRight
-            text: place.modelData.name
-            color: locations.currentDir === place.modelData.path ? Color.accent : Color.foreground
-            font.pixelSize: 12
-          }
-          HoverHandler { id: hov }
-          TapHandler { onSingleTapped: locations.chosen(place.modelData.path) }
-        }
+      /// Places are tree roots now. The row still behaves as it did -- clicking
+      /// the name goes there -- and gains a disclosure that opens the folder in
+      /// place instead of navigating to it.
+      FolderTree {
+        width: content.width
+        roots: locations.shownPlaces
+        currentDir: locations.currentDir
+        showHidden: locations.showHidden
+        onChosen: function (p) { locations.chosen(p) }
       }
+
+
 
       // Only drawn where it buys something: at a full-height sidebar, or with
       // three places or fewer, nothing is being hidden and this row would be

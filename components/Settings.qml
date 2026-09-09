@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import Qt.labs.folderlistmodel
 import Quickshell
 import Quickshell.Io
 
@@ -26,6 +27,16 @@ Item {
   readonly property string path: settings.dir + "/settings.json"
 
   property bool checksum: false
+  property bool showHidden: false
+  property bool showIcons: true
+  /// Pinned folder paths, newest first.
+  property var pinned: []
+  /// Named, not numbered. This defaulted to 0 -- which is FolderListModel's
+  /// *Unsorted*, not Name -- so a fresh install listed files in filesystem
+  /// order with no column marked, and the header looked broken rather than
+  /// unsorted.
+  property int sortField: FolderListModel.Name
+  property bool sortReversed: false
 
   /// Guards the initial read from writing straight back out. The file's own
   /// load (or its absence, on a first run) is not a user decision to persist —
@@ -36,13 +47,34 @@ Item {
     var obj = {}
     try { obj = JSON.parse(json) } catch (e) { obj = {} }
     settings.checksum = obj.checksum === true
+    settings.showHidden = obj.showHidden === true
+    settings.showIcons = obj.showIcons !== false
+    settings.pinned = Array.isArray(obj.pinned) ? obj.pinned : []
+    if (typeof obj.sortField === "number") settings.sortField = obj.sortField
+    settings.sortReversed = obj.sortReversed === true
     settings._loaded = true
   }
 
-  onChecksumChanged: {
+  /// One writer for every setting. Two `onXChanged` handlers each writing
+  /// their own object would have the second erase the first's key.
+  function _save() {
     if (!settings._loaded) return
-    file.setText(JSON.stringify({ checksum: settings.checksum }) + "\n")
+    file.setText(JSON.stringify({
+      checksum: settings.checksum,
+      showHidden: settings.showHidden,
+      showIcons: settings.showIcons,
+      pinned: settings.pinned,
+      sortField: settings.sortField,
+      sortReversed: settings.sortReversed
+    }) + "\n")
   }
+
+  onChecksumChanged: settings._save()
+  onShowHiddenChanged: settings._save()
+  onShowIconsChanged: settings._save()
+  onPinnedChanged: settings._save()
+  onSortFieldChanged: settings._save()
+  onSortReversedChanged: settings._save()
 
   // FileView cannot create a missing parent directory on write, and this
   // plugin's directory does not otherwise exist until something asks for it.

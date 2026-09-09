@@ -474,6 +474,25 @@ fn dispatch(req: Request, shared: &Shared, out: &Arc<Mutex<UnixStream>>) -> std:
             };
             send(out, &ev)
         }
+        Request::Space { id, path } => {
+            // No Job, no registry entry, no revision bump: this asks a question
+            // about a filesystem and changes nothing, so it is answered on the
+            // reader thread like `conflicts` rather than started like a Job.
+            let ev = match crate::space::query(Path::new(&path)) {
+                Ok(s) => Event::Space {
+                    seq: shared.next_seq(), id, path,
+                    total: Some(s.total), available: Some(s.available), error: None,
+                },
+                // Absent numbers, not zero. A caller that reads a failed query
+                // as "no room" refuses every transfer to a path it could not
+                // ask about, which is worse than not asking at all.
+                Err(e) => Event::Space {
+                    seq: shared.next_seq(), id, path,
+                    total: None, available: None, error: Some(e),
+                },
+            };
+            send(out, &ev)
+        }
         Request::Release { id, job } => {
             shared.remove(&job);
             send(out, &Event::Reply { seq: shared.next_seq(), id, job: None, error: None })

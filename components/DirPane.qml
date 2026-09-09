@@ -26,6 +26,172 @@ Rectangle {
   property alias cursorIndex: list.currentIndex
 
   signal activated()                  // this pane was interacted with
+  /// A row that is not a directory was activated. The pane does not open
+  /// files itself -- opening is the window's business, exactly as it is for
+  /// Enter, so both gestures go through one function and cannot diverge.
+  signal openRequested()
+  /// Show dotfiles. Persisted by the window (Ctrl+H).
+  property bool showHidden: false
+  property bool showIcons: true
+  /// Sorting is the window's, not the pane's: two panes sorted differently
+  /// cannot be compared, and comparing them is what dual-pane is for.
+  property int sortField: FolderListModel.Name
+  property bool sortReversed: false
+  signal sortRequested(int field)
+
+  /// What this pane's filesystem can still take, from the daemon.
+  ///
+  /// -1 means "not asked, or could not tell" and is deliberately NOT 0: zero is
+  /// a full disk, a real answer somebody will act on, and treating "unknown" as
+  /// "full" would refuse every transfer to a path the daemon merely could not
+  /// stat.
+  property real freeBytes: -1
+  property real totalBytes: -1
+  /// Asked whenever the directory changes, because free space is a fact about
+  /// the filesystem the pane is now looking at, not about the one it left.
+  signal spaceWanted(string path)
+
+  /// The size of what is picked, for the pre-flight fit check. Folders count as
+  /// nothing because this version does not transfer them, which is the same
+  /// rule `selectedFileCount()` applies -- arming and acting stay one
+  /// expression.
+  function selectedBytes() {
+    var total = 0
+    for (var i = 0; i < folderModel.count; i++) {
+      if (folderModel.get(i, "fileIsDir")) continue
+      if (pane.selection.indexOf(String(folderModel.get(i, "fileName"))) === -1) continue
+      total += Number(folderModel.get(i, "fileSize")) || 0
+    }
+    return total
+  }
+
+  /// Where this pane has been, and where it was before it went back.
+  ///
+  /// Recorded in `onDirChanged` rather than in `enter()`, `goUp()` and the four
+  /// other places that assign `dir`. One gate, for the same reason
+  /// `noteMutation()` is one gate: a navigation added later that forgets to
+  /// record itself is a back button that silently skips a step.
+  property var backStack: []
+  property var forwardStack: []
+  readonly property bool canGoBack: pane.backStack.length > 0
+  readonly property bool canGoForward: pane.forwardStack.length > 0
+  /// Suppresses recording while back/forward are themselves moving `dir`,
+  /// which would otherwise push the place you just left back onto the stack
+  /// and make Back oscillate between two directories forever.
+  property bool _replaying: false
+  property string _lastDir: ""
+
+  onDirChanged: {
+    if (pane._replaying) { pane._lastDir = pane.dir; return }
+    if (pane._lastDir !== "" && pane._lastDir !== pane.dir) {
+      // Capped. A session that browses for hours should not accumulate an
+      // unbounded array of strings for a button that reaches back nine or ten.
+      var b = pane.backStack.concat([pane._lastDir])
+      pane.backStack = b.length > 100 ? b.slice(b.length - 100) : b
+      // Going somewhere new abandons the forward branch, as every browser does.
+      pane.forwardStack = []
+    }
+    pane._lastDir = pane.dir
+    // A filter belongs to the directory it was typed in. Carrying it across a
+    // navigation would have a new folder open already hiding most of itself,
+    // with the reason two directories behind you.
+    pane.filter = ""
+    filterInput.text = ""
+    pane.filtering = false
+    if (pane.dir !== "") pane.spaceWanted(pane.dir)
+  }
+
+  /// True while the path strip is a text field rather than a breadcrumb.
+  property bool editingPath: false
+
+  /// Narrowing what the pane lists, by substring.
+  ///
+  /// A filter hides files, and a pane that hides files without saying so is the
+  /// same failure as a pane that draws nineteen of forty rows and shows no
+  /// scrollbar (issue 17). So the strip is visible whenever a filter is set,
+  /// and it states how many of how many survived.
+  property string filter: ""
+  property bool filtering: false
+
+  function beginFilter() {
+    pane.activated()
+    pane.filtering = true
+    filterInput.forceActiveFocus()
+    filterInput.selectAll()
+  }
+
+  function endFilter(keepText) {
+    pane.filtering = false
+    if (!keepText) { pane.filter = ""; filterInput.text = "" }
+    list.forceActiveFocus()
+  }
+
+  function beginPathEdit() {
+    pane.activated()
+    pathEdit.text = pane.dir
+    // Focus is taken in the field's own onVisibleChanged; see there.
+    pane.editingPath = true
+  }
+
+  /// Refuses rather than obeys. An empty pane pointed at a path that does not
+  /// exist looks identical to an empty directory, and the user would have no
+  /// way to tell which they had just done to themselves.
+  function commitPath(text) {
+    var want = String(text).trim()
+    if (want === "") { pane.editingPath = false; return }
+    if (want.charAt(0) === "~") want = pane.homePath + want.substring(1)
+    // A trailing slash is how people type directories; it is not part of one.
+    while (want.length > 1 && want.charAt(want.length - 1) === "/")
+      want = want.substring(0, want.length - 1)
+    pane.pathChecked(want)
+  }
+
+  signal pathChecked(string path)
+
+  /// Set by the window, which owns the home directory.
+  property string homePath: ""
+
+  function goBack() {
+    if (!pane.canGoBack) return
+    var b = pane.backStack.slice()
+    var to = b.pop()
+    pane._replaying = true
+    pane.forwardStack = [pane.dir].concat(pane.forwardStack)
+    pane.backStack = b
+    pane.dir = to
+    pane._replaying = false
+    pane.clearSelection()
+  }
+
+  function goForward() {
+    if (!pane.canGoForward) return
+    var f = pane.forwardStack.slice()
+    var to = f.shift()
+    pane._replaying = true
+    pane.backStack = pane.backStack.concat([pane.dir])
+    pane.forwardStack = f
+    pane.dir = to
+    pane._replaying = false
+    pane.clearSelection()
+  }
+
+  /// Clicking anywhere in the pane makes it the active one -- the empty space
+  /// below the rows, the header, the gutter. Before this, `activated()` was
+  /// emitted only by FileRow, so the sole way to point the sidebar at a pane
+  /// was to click a file in it: you could not aim without also selecting.
+  ///
+  /// A TapHandler rather than a MouseArea, and on the root rather than over
+  /// the list, so it sees only taps the rows and the header controls did not
+  /// take. It must not steal a click from a breadcrumb or from Go▾.
+  /// Default gesturePolicy, deliberately -- the same correction the handler
+  /// inside the ListView needed. ReleaseWithinBounds takes an *exclusive* grab
+  /// on press, and on the pane's root that grab covers every child: it ate the
+  /// scrollbar's clicks entirely, and the scrollbar was rewritten twice chasing
+  /// a bug that was never in it. DragThreshold takes a passive grab and leaves
+  /// controls inside the pane working.
+  TapHandler {
+    onSingleTapped: pane.activated()
+  }
   signal contextRequested(real gx, real gy)
   signal dragBegan()
   signal dragReleased(real sx, real sy)
@@ -43,7 +209,14 @@ Rectangle {
   property var pendingReveal: []
   property int revealAttempts: 0
 
-  color: "transparent"
+  /// Focus is brightness, not a border. A 2px accent stripe on the active
+  /// pane's edge was easy to miss at a glance and easy to mistake for a
+  /// divider; the pane you are aiming at should simply be the lit one.
+  ///
+  /// Derived from `Color.background` rather than written down, so it follows
+  /// the user's theme and satisfies the lint's no-literal-colours rule.
+  color: pane.active ? Qt.lighter(Color.background, 1.45)
+                     : Qt.darker(Color.background, 1.25)
 
   function humanSize(bytes) {
     var b = Number(bytes)
@@ -114,6 +287,15 @@ Rectangle {
     if (n < 0) n = 0
     if (n >= folderModel.count) n = folderModel.count - 1
     list.currentIndex = n
+  }
+
+  /// The file under the cursor, or "" when the cursor is on a folder or on
+  /// nothing. Preview is a per-file gesture and a folder has nothing to show.
+  function fileAtCursor() {
+    var i = list.currentIndex
+    if (i < 0 || i >= folderModel.count) return ""
+    if (folderModel.get(i, "fileIsDir")) return ""
+    return String(folderModel.get(i, "filePath"))
   }
 
   function moveCursorHome() { list.currentIndex = 0 }
@@ -310,8 +492,15 @@ Rectangle {
     id: folderModel
     folder: "file://" + pane.dir
     showDirsFirst: true
+    // Substring, not a glob the user has to know they are writing. Someone
+    // typing "img" means "anything with img in it", and requiring *img* would
+    // make the common case the one that needs syntax.
+    nameFilters: pane.filter === "" ? ["*"] : ["*" + pane.filter + "*"]
+    caseSensitive: false
+    sortField: pane.sortField
+    sortReversed: pane.sortReversed
     showDotAndDotDot: false
-    showHidden: false
+    showHidden: pane.showHidden
     onFolderChanged: {
       pane.clearSelection()
       // A reveal is about one directory. Leaving it armed across a navigation
@@ -325,11 +514,6 @@ Rectangle {
   // The active pane is marked with an accent edge rather than a border: a box
   // around one of two adjacent panes fights the "two halves of one thing"
   // reading (ticket 08).
-  Rectangle {
-    anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-    width: 2
-    color: pane.active ? Color.accent : "transparent"
-  }
 
   Item {
     id: header
@@ -343,12 +527,57 @@ Rectangle {
     // open complaint about this project.
     Item {
       id: breadcrumbArea
-      anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 14; right: goButton.left; rightMargin: 8 }
+      anchors { verticalCenter: parent.verticalCenter; left: goButton.right; leftMargin: 10; right: cnt.left; rightMargin: 8 }
       height: 18
       clip: true
 
+      /// Typing a path, without losing the breadcrumb.
+      ///
+      /// The breadcrumb stays what it is -- clicking a segment jumps to it, and
+      /// that was worth keeping. Double-clicking the path turns the same strip
+      /// into a field holding the full path, which is the browser convention
+      /// and needs no second control competing for a 36px header.
+      ///
+      /// Escape restores the breadcrumb and changes nothing. Enter navigates,
+      /// but only somewhere that exists: a typo must not blank the pane, and a
+      /// path naming a file rather than a directory is a mistake worth saying
+      /// out loud rather than obeying.
+      TextInput {
+        id: pathEdit
+        anchors.fill: parent
+        visible: pane.editingPath
+        verticalAlignment: TextInput.AlignVCenter
+        color: Color.foreground
+        selectionColor: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.35)
+        selectedTextColor: Color.foreground
+        font.pixelSize: 12
+        clip: true
+        onAccepted: pane.commitPath(pathEdit.text)
+        Keys.onEscapePressed: pane.editingPath = false
+
+        // Focus here, not in beginPathEdit(). That function flips
+        // `editingPath` and calls forceActiveFocus() in the same frame, before
+        // this item is actually visible -- and focusing an invisible item does
+        // nothing, so the field opened and then swallowed nothing: every
+        // keystroke went to the window's own handler instead. Watched exactly
+        // that way, with the path unchanged after typing a new one.
+        // Deferred with callLater, not taken directly. beginPathEdit() emits
+        // activated() first, and the window answers that by calling
+        // browser.forceActiveFocus() -- so focus taken here in the same turn is
+        // handed straight back and the field opens deaf. Watched exactly that
+        // way: the editor appeared, and every keystroke went to the window's
+        // key handler instead of into it. callLater runs after the whole
+        // activation settles, and is the last word.
+        onVisibleChanged: if (pathEdit.visible) Qt.callLater(pathEdit.takeFocus)
+        function takeFocus() {
+          pathEdit.forceActiveFocus()
+          pathEdit.selectAll()
+        }
+      }
+
       Row {
         id: crumbRow
+        visible: !pane.editingPath
         // Right-anchored: when the path is wider than the area, the directory
         // actually open matters more than the root, so the tail is what stays
         // on screen rather than eliding it away.
@@ -378,7 +607,14 @@ Rectangle {
               color: pane.active ? Color.foreground : Color.muted
               font.pixelSize: 12
               font.bold: pane.active && crumb.index === pane.crumbs().length - 1
-              TapHandler { onSingleTapped: pane.dir = crumb.modelData.path }
+              // One handler with both callbacks. Two TapHandlers on the same
+              // item do not share a gesture: the single-tap one takes it and
+              // the double-tap one never fires -- watched, with a double-click
+              // on the path navigating instead of opening the editor.
+              TapHandler {
+                onSingleTapped: { pane.activated(); pane.dir = crumb.modelData.path }
+                onDoubleTapped: pane.beginPathEdit()
+              }
             }
           }
         }
@@ -389,18 +625,76 @@ Rectangle {
     // to, independent of the shared sidebar and of which pane is the transfer
     // source. Named "Go" rather than the sidebar's own vocabulary because this
     // is the one word a keyboard-first tool can bind a mnemonic to later.
+    /// Back and forward, in the order a browser puts them, left of everything
+    /// else in the header. Drawn muted and inert rather than hidden when there
+    /// is nowhere to go: a control that vanishes teaches nothing about why.
+    Row {
+      id: navRow
+      anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
+      spacing: 8
+      Text {
+        text: "‹"
+        font.pixelSize: 15
+        color: pane.canGoBack ? (backHover.hovered ? Color.foreground : Color.muted)
+                              : Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.35)
+        HoverHandler { id: backHover; enabled: pane.canGoBack }
+        TapHandler { onSingleTapped: { pane.activated(); pane.goBack() } }
+      }
+      Text {
+        text: "›"
+        font.pixelSize: 15
+        color: pane.canGoForward ? (fwdHover.hovered ? Color.foreground : Color.muted)
+                                 : Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.35)
+        HoverHandler { id: fwdHover; enabled: pane.canGoForward }
+        TapHandler { onSingleTapped: { pane.activated(); pane.goForward() } }
+      }
+    }
+
+    /// Typing a path, as a button rather than only as a gesture.
+    ///
+    /// Double-clicking the path opens the same editor, but a double-click is
+    /// invisible: nothing on screen says the path can be typed. This says it,
+    /// and it is also the only way in that cannot be lost to the breadcrumb's
+    /// own click handling.
+    Text {
+      id: editPath
+      anchors { verticalCenter: parent.verticalCenter; left: navRow.right; leftMargin: 10 }
+      text: "✎"
+      color: pane.editingPath ? Color.accent
+                              : (editHover.hovered ? Color.foreground : Color.muted)
+      font.pixelSize: 12
+      HoverHandler { id: editHover }
+      TapHandler { onSingleTapped: pane.beginPathEdit() }
+    }
+
     Text {
       id: goButton
-      anchors { verticalCenter: parent.verticalCenter; right: cnt.left; rightMargin: 10 }
+      // Left of the path, not right of it. The menu opens at the pane's left
+      // edge, so a button on the far right meant the list appeared most of a
+      // pane away from the cursor that summoned it -- found by using it.
+      anchors { verticalCenter: parent.verticalCenter; left: editPath.right; leftMargin: 10 }
       text: "Go ▾"
       color: goMenu.open ? Color.accent : Color.muted
       font.pixelSize: 11
       TapHandler { onSingleTapped: goMenu.open = !goMenu.open }
     }
 
+    /// Free space, right of the count. Dropped rather than elided below 420px --
+    /// a truncated byte figure is worse than none, because "42 G" and "4.2 GB"
+    /// are both plausible readings of the same clipped string.
+    Text {
+      id: freeText
+      anchors { verticalCenter: parent.verticalCenter; right: parent.right; rightMargin: 14 }
+      visible: pane.freeBytes >= 0 && pane.width > 420
+      text: pane.humanSize(pane.freeBytes) + " free"
+      color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, pane.active ? 1.0 : 0.55)
+      font.pixelSize: 11
+    }
+
     Text {
       id: cnt
-      anchors { verticalCenter: parent.verticalCenter; right: parent.right; rightMargin: 14 }
+      anchors { verticalCenter: parent.verticalCenter
+                right: freeText.visible ? freeText.left : parent.right; rightMargin: 14 }
       // Files and folders counted separately, and the selection counted the way
       // the actions count it (ADR 0014). This is the one place `selection` may
       // still be read directly -- the header describes what the pane *shows*,
@@ -440,13 +734,96 @@ Rectangle {
     z: 40
   }
 
+  /// An empty directory and one that has not loaded looked identical: both a
+  /// blank pane. Says which.
+  Text {
+    anchors.centerIn: list
+    visible: folderModel.count === 0 && folderModel.status === FolderListModel.Ready
+    text: pane.showHidden ? "Empty folder" : "Nothing here — Ctrl+H shows hidden files"
+    color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, pane.active ? 1.0 : 0.55)
+    font.pixelSize: 12
+  }
+
+  ColumnHeader {
+    id: columns
+    anchors { top: rule.bottom; left: parent.left; right: parent.right }
+    sortField: pane.sortField
+    sortReversed: pane.sortReversed
+    paneActive: pane.active
+    rowWidth: pane.width
+    onSortRequested: function (field) { pane.sortRequested(field) }
+  }
+
+  /// Costs nothing when there is no filter: zero height, not merely hidden.
+  Rectangle {
+    id: filterBar
+    anchors { top: columns.bottom; left: parent.left; right: parent.right }
+    height: (pane.filtering || pane.filter !== "") ? 26 : 0
+    visible: height > 0
+    color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.10)
+
+    Text {
+      id: filterLabel
+      anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 12 }
+      text: "Filter"
+      color: Color.muted
+      font.pixelSize: 11
+    }
+
+    TextInput {
+      id: filterInput
+      anchors { verticalCenter: parent.verticalCenter; left: filterLabel.right
+                leftMargin: 8; right: filterCount.left; rightMargin: 10 }
+      color: Color.foreground
+      selectionColor: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.35)
+      selectedTextColor: Color.foreground
+      font.pixelSize: 12
+      clip: true
+      onTextChanged: pane.filter = filterInput.text
+      // Enter leaves the field but keeps the filter: you have finished typing
+      // it, not finished with it. Escape is the one that undoes.
+      onAccepted: pane.endFilter(true)
+      Keys.onEscapePressed: pane.endFilter(false)
+    }
+
+    /// What is being hidden, always. This is the whole reason the strip stays
+    /// on screen while a filter is set.
+    Text {
+      id: filterCount
+      anchors { verticalCenter: parent.verticalCenter; right: parent.right; rightMargin: 14 }
+      text: folderModel.count + " shown"
+      color: Color.muted
+      font.pixelSize: 11
+    }
+  }
+
   ListView {
     id: list
-    anchors { top: rule.bottom; bottom: parent.bottom; left: parent.left; right: parent.right }
+    anchors { top: filterBar.bottom; bottom: parent.bottom; left: parent.left; right: parent.right }
     clip: true
     model: folderModel
     focus: pane.active
     highlightMoveDuration: 0
+
+    /// The empty space below the rows still belongs to this pane (issue 31).
+    ///
+    /// This handler is inside the ListView on purpose. A TapHandler on the
+    /// pane's root never sees a tap here: a ListView is a Flickable and takes
+    /// the press for a possible drag, so the root handler fires for the header
+    /// and the gutter and for nothing in the list at all. Watched failing
+    /// exactly that way -- clicking below the rows left the transfer direction
+    /// unchanged.
+    ///
+    /// The default gesturePolicy (DragThreshold) is load-bearing, not an
+    /// omission. ReleaseWithinBounds takes an *exclusive* grab on press, which
+    /// this handler held for the whole list -- so a row's TapHandler never saw
+    /// the second tap and onDoubleTapped stopped firing entirely. Double-click
+    /// to open was broken by the fix that made the pane clickable, and only a
+    /// report of "menu Open works, double-click does not" separated them.
+    /// DragThreshold takes a passive grab, so the rows still get their taps.
+    TapHandler {
+      onSingleTapped: pane.activated()
+    }
 
     delegate: FileRow {
       required property var model
@@ -457,6 +834,8 @@ Rectangle {
       isDir: model.fileIsDir
       selected: pane.isSelected(model.fileName)
       cursor: pane.active && index === list.currentIndex
+      paneActive: pane.active
+      showIcons: pane.showIcons
       sizeText: model.fileIsDir ? "" : pane.humanSize(model.fileSize)
       timeText: pane.humanTime(model.fileModified)
       flash: pane.isRevealed(model.fileName)
@@ -469,7 +848,12 @@ Rectangle {
       }
       onActivated: {
         pane.activated()
+        // Enter has done this since it was written (App.qml): a directory is
+        // entered, a file is opened. Double-click did only the first half and
+        // silently did nothing on a file -- the commonest gesture in any file
+        // manager, landing on nothing at all.
         if (model.fileIsDir) pane.enter(index)
+        else pane.openRequested()
       }
       onContextRequested: function (gx, gy) {
         pane.activated()

@@ -13,6 +13,7 @@ pub mod fs_ops;
 pub mod journal;
 pub mod protocol;
 pub mod server;
+pub mod space;
 pub mod trash;
 pub mod tier;
 

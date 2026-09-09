@@ -21,6 +21,9 @@ Rectangle {
   /// finished row — arming and acting are the same expression here for the
   /// same reason `scripts/lint-qml.sh` requires it of `DirPane`'s controls.
   property var dismissableJobIds: []
+  /// Asked for the shortcut sheet. The panel does not own it -- it is a layer
+  /// over the whole window -- so it only says that somebody clicked.
+  signal helpRequested()
   signal dismissRequested(string jobId)
 
   // One row, one Job. Named because three separate things measure against it:
@@ -269,11 +272,38 @@ Rectangle {
     height: panel.footHeight
     Text {
       anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 16
-                right: clearFinished.visible ? clearFinished.left : parent.right
-                rightMargin: clearFinished.visible ? 16 : 16 }
+                right: helpHint.left; rightMargin: 16 }
       elide: Text.ElideRight
       text: "Kept for this session only. Interrupted transfers resume; nothing else is stored."
       color: Color.muted; font.pixelSize: 10
+    }
+
+    /// The keyboard, offered along the bottom of the window.
+    ///
+    /// It lived in the action bar's right group first, beside the checksum
+    /// chip, and the person who asked for it did not find it there: "I see the
+    /// ? now but I did not expect it there." The request was for a help line
+    /// "on bottom of the app", and this row already runs along the bottom, so
+    /// it costs no pixels that were not already spent.
+    Row {
+      id: helpHint
+      anchors { verticalCenter: parent.verticalCenter
+                right: clearFinished.visible ? clearFinished.left : parent.right
+                rightMargin: 16 }
+      spacing: 5
+      Text {
+        text: "?"
+        color: helpHover.hovered ? Color.foreground : Color.accent
+        font.pixelSize: 11
+      }
+      Text {
+        text: "shortcuts"
+        color: helpHover.hovered ? Color.foreground : Color.muted
+        font.pixelSize: 10
+        anchors.verticalCenter: parent.verticalCenter
+      }
+      HoverHandler { id: helpHover }
+      TapHandler { onSingleTapped: panel.helpRequested() }
     }
     // One button for every dismissable row rather than one per row: a
     // per-row control would have to fit inside a 44px row already carrying

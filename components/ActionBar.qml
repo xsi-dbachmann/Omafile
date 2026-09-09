@@ -17,6 +17,16 @@ Rectangle {
   /// A folder is among what is picked. Says why the count is short.
   property bool containsDir: false
   property string directionLabel: "right"
+  /// The x of the pane the actions would act on, in this bar's coordinates.
+  /// The buttons align to it so they sit under the pane they affect rather
+  /// than in a fixed corner: which pane is the source is the single most
+  /// important fact in a dual-pane transfer, and the controls now state it by
+  /// where they are as well as by what they say.
+  property real sourceX: 0
+  /// True when the source is the left pane. The summary moves to the opposite
+  /// side of the buttons, which is the only place always guaranteed to have
+  /// room at the 720px minimum (ADR 0014).
+  property bool sourceIsLeft: true
   property bool checksum: false
   property bool canTransfer: true
   property string reason: ""
@@ -85,11 +95,17 @@ Rectangle {
 
   Text {
     id: summaryText
+    // Opposite the buttons: left of them when the source is the right pane,
+    // right of them when it is the left. Anchored both sides so it elides
+    // instead of colliding, which is the failure ADR 0014 exists to prevent.
     anchors {
       verticalCenter: parent.verticalCenter
-      left: parent.left; leftMargin: 16
-      right: btnRow.left; rightMargin: 12
+      left: bar.sourceIsLeft ? btnRow.right : parent.left
+      leftMargin: bar.sourceIsLeft ? 14 : 16
+      right: bar.sourceIsLeft ? rightGroup.left : btnRow.left
+      rightMargin: 12
     }
+    horizontalAlignment: bar.sourceIsLeft ? Text.AlignLeft : Text.AlignRight
     elide: Text.ElideRight
     text: bar.selectedCount === 0
           ? (bar.containsDir ? "Folders are not transferred in this version" : "Nothing selected")
@@ -103,7 +119,9 @@ Rectangle {
     id: btnRow
     anchors {
       verticalCenter: parent.verticalCenter
-      right: rightGroup.left; rightMargin: 12
+      // Pinned to the source pane, but never past the right group.
+      left: parent.left
+      leftMargin: Math.max(16, Math.min(bar.sourceX, rightGroup.x - width - 12))
     }
     spacing: 10
 

@@ -36,6 +36,48 @@ Item {
   /// `components/Settings.qml`. An alias, not a copy: every write here is a
   /// write there, so nothing has to remember to save it.
   property alias checksum: settings.checksum
+  property alias showHidden: settings.showHidden
+  property alias showIcons: settings.showIcons
+  property alias pinned: settings.pinned
+
+  /// Pin or unpin the pane you are looking at. One key does both, because a
+  /// folder is either in the list or it is not and there is nothing to choose.
+  function togglePin(path) {
+    var i = root.pinned.indexOf(path)
+    var next = root.pinned.slice()
+    if (i === -1) {
+      next.unshift(path)
+      // Reassigned whole, never mutated in place: a JS array mutated behind a
+      // property's back does not notify, so the sidebar would not redraw and
+      // the setting would not save.
+      root.pinned = next
+      root.setNotice("Pinned " + root.wording.folderName(path), "ok")
+    } else {
+      next.splice(i, 1)
+      root.pinned = next
+      root.setNotice("Unpinned " + root.wording.folderName(path), "warn")
+    }
+  }
+  property alias sortField: settings.sortField
+  property alias sortReversed: settings.sortReversed
+
+  /// Clicking the sorted column reverses it; clicking another switches to it,
+  /// ascending. Reversing on a *switch* would make the same click mean two
+  /// things depending on where you last clicked.
+  /// `test -d`, not a guess. A typed path that does not exist must not blank
+  /// the pane: an empty pane pointed at nothing looks exactly like an empty
+  /// directory, and the user would have no way to tell which had happened.
+  function checkPath(pane, path) {
+    pathCheck.forPane = pane
+    pathCheck.candidate = path
+    pathCheck.command = ["test", "-d", path]
+    pathCheck.running = true
+  }
+
+  function sortBy(field) {
+    if (root.sortField === field) root.sortReversed = !root.sortReversed
+    else { root.sortField = field; root.sortReversed = false }
+  }
   property string proto: ""
   /// The sidebar costs pane width, and dual-pane already made it scarce
   /// (ticket 08). Ctrl+B takes it back.
@@ -581,8 +623,15 @@ Item {
                    : "Pick one file to open, not " + srcPane.selectedFileCount(), "warn")
       return
     }
+    // Say so. Opening had no feedback of any kind: on a file type with no
+    // handler, or when the launched app took a moment to appear, "double-click
+    // did nothing" was indistinguishable from the gesture not being wired --
+    // and for a while it genuinely was not, which is exactly why silence here
+    // cost a bug report to find.
+    root.openedName = one.substring(one.lastIndexOf("/") + 1)
     opener.command = ["xdg-open", one]
     opener.running = true
+    root.setNotice("Opening " + root.openedName, "warn")
   }
 
   function renameSelection() {
@@ -745,6 +794,30 @@ Item {
                                          : "Pick a file to " + (isMove ? "move" : "copy"), "warn")
       return
     }
+    // Refuse a copy that cannot fit, before the first byte rather than after
+    // some of them. This is the whole argument of the product applied to the
+    // one failure it can see coming: the engine already knows what the sources
+    // weigh, and the daemon now knows what the destination can take.
+    //
+    // Copies only, on purpose. A same-filesystem move writes nothing at all --
+    // it is a rename (ADR 0002) -- so refusing one for want of space would be a
+    // false refusal, and a false refusal blocks work that would have succeeded.
+    // We cannot tell from here whether a move crosses a filesystem, so a move
+    // is left to the engine, which finds out for certain.
+    //
+    // Known limitation, stated rather than hidden: a copy that replaces
+    // existing files reclaims their bytes, and this does not count that. Such a
+    // copy can be refused when it would in fact have fitted. Conflicts are not
+    // resolved until after this point (ADR 0013), so the number needed to be
+    // exact is not available yet.
+    if (!isMove && dstPane.freeBytes >= 0) {
+      var need = srcPane.selectedBytes()
+      if (need > dstPane.freeBytes) {
+        root.setNotice("Not enough room — " + srcPane.humanSize(need) + " to copy, "
+                       + dstPane.humanSize(dstPane.freeBytes) + " free", "bad")
+        return
+      }
+    }
     // One request, one Job. Sending a request per file would put the selection
     // beyond the reach of the stop rule.
     if (!beginTransfer(paths, dstPane.dir, isMove)) return
@@ -752,9 +825,45 @@ Item {
   }
 
   Process {
+    id: pathCheck
+    running: false
+    // The pane that asked, so the answer goes back to the right one.
+    property var forPane: null
+    property string candidate: ""
+    // (A comment line beginning with the linter's name is read as a directive.)
+    // qmllint disable signal-handler-parameters
+    onExited: function (code) {
+      if (code === 0) {
+        pathCheck.forPane.dir = pathCheck.candidate
+        pathCheck.forPane.editingPath = false
+      } else {
+        root.setNotice("No folder at " + pathCheck.candidate, "bad")
+      }
+    }
+  }
+
+  Process {
     id: opener
     running: false
+    // The exit code comes from the signal, not from a property: Process
+    // exposes no `exitCode` to read afterwards. Its second argument is a
+    // QProcess enum the linter cannot resolve through this import, so the
+    // handler declares only the argument it uses and the parameter check is
+    // switched off -- the accommodation Settings.qml's Process already needed.
+    // (Careful: a comment line *beginning* with the linter's name is read as a
+    // directive, which is how this block first produced six bogus warnings.)
+    // qmllint disable signal-handler-parameters
+    onExited: function (code) {
+      // xdg-open returns 3 for "no handler" and 4 for "action failed"; both
+      // look identical to the user without this, because the window it was
+      // waiting for simply never appears.
+      if (code !== 0)
+        root.setNotice("Nothing here opens " + root.openedName, "bad")
+    }
   }
+
+  /// The file the opener was last asked for, so its exit can name it.
+  property string openedName: ""
 
   // Declared before the client, because the client's handlers reach into it
   // and a property-change handler can fire while the rest of the tree is still
@@ -874,6 +983,14 @@ Item {
       if (said) root.setNotice(said.text, said.role)
     }
     onRestored: function (info) { root.noteRestored(info) }
+    /// The answer names the path it was asked about, so it can be handed to
+    /// whichever pane is looking at it -- both, when they are in the same
+    /// place, which is a normal thing to do.
+    onSpaceReported: function (path, total, available, error) {
+      if (error !== "") return
+      if (leftPane.dir === path) { leftPane.freeBytes = available; leftPane.totalBytes = total }
+      if (rightPane.dir === path) { rightPane.freeBytes = available; rightPane.totalBytes = total }
+    }
     onTrashAvailability: function (path, available) {
       if (root.pendingDelete.length === 0) return
       confirmDelete.ask(root.pendingDelete, available, root.srcPane.dir)
@@ -973,6 +1090,9 @@ Item {
 
       Locations {
         id: sidebar
+        pinned: root.pinned
+        showHidden: root.showHidden
+        onUnpinned: function (path) { root.togglePin(path) }
         anchors { top: parent.top; bottom: actions.top; left: parent.left }
         width: root.showLocations ? root.sidebarWidth : 0
         visible: root.showLocations
@@ -1026,6 +1146,15 @@ Item {
 
       DirPane {
         id: leftPane
+        homePath: root.homeDir
+        showIcons: root.showIcons
+        onSpaceWanted: function (path) { daemon.askSpace(path) }
+        onPathChecked: function (path) { root.checkPath(leftPane, path) }
+        showHidden: root.showHidden
+        sortField: root.sortField
+        sortReversed: root.sortReversed
+        onSortRequested: function (field) { root.sortBy(field) }
+        onOpenRequested: root.openSelection()
         anchors { top: parent.top; bottom: actions.top; left: sidebarRule.right }
         width: {
           var avail = parent.width - sidebar.width - sidebarRule.width - divider.width
@@ -1082,6 +1211,15 @@ Item {
 
       DirPane {
         id: rightPane
+        homePath: root.homeDir
+        showIcons: root.showIcons
+        onSpaceWanted: function (path) { daemon.askSpace(path) }
+        onPathChecked: function (path) { root.checkPath(rightPane, path) }
+        showHidden: root.showHidden
+        sortField: root.sortField
+        sortReversed: root.sortReversed
+        onSortRequested: function (field) { root.sortBy(field) }
+        onOpenRequested: root.openSelection()
         anchors { top: parent.top; bottom: actions.top; left: divider.right; right: parent.right }
         dir: root.homeDir + "/Downloads"
         active: root.activePane === 1
@@ -1094,9 +1232,17 @@ Item {
         onDragMoved: function (sx, sy) { root.updateDropTarget(sx, sy) }
       }
 
+      Shortcuts { id: shortcutSheet }
+
+      Preview { id: previewSheet }
+
       ActionBar {
         id: actions
         anchors { bottom: transfers.top; left: parent.left; right: parent.right }
+        // The controls sit under the pane they act on, so the source pane is
+        // stated by position as well as by the button's own words.
+        sourceX: root.activePane === 0 ? leftPane.x : rightPane.x
+        sourceIsLeft: root.activePane === 0
         // Armed from the count the actions run on. A pane's selection holds
         // folders too and selectedPaths() drops them; armed from the raw
         // length, Copy lit for a folder and then did nothing (instance #8,
@@ -1145,6 +1291,7 @@ Item {
         // panel on screen. Found by looking at it, not by a test.
         jobs: daemon.jobs
         dismissableJobIds: root.dismissableJobIds
+        onHelpRequested: shortcutSheet.open = true
         onDismissRequested: function (jobId) { root.dismissJob(jobId) }
         daemonLive: daemon.canTransfer
         daemonNote: daemon.canTransfer
@@ -1211,6 +1358,29 @@ Item {
           return
         }
 
+        // Layers close before the window does, innermost first. Preview sits
+        // above the shortcut sheet because it is what you opened most recently.
+        if (previewSheet.open) {
+          if (event.key === Qt.Key_Escape || event.key === Qt.Key_F3
+              || (event.key === Qt.Key_Space && (event.modifiers & Qt.AltModifier) !== 0)) {
+            previewSheet.open = false
+            event.accepted = true
+          }
+          return
+        }
+
+        // The shortcut sheet is a layer over the window, so Escape must close
+        // the layer before it closes the window -- the same rule the context
+        // menu guard above established, for the same reason.
+        if (shortcutSheet.open) {
+          if (event.key === Qt.Key_Escape || event.key === Qt.Key_Question
+              || event.key === Qt.Key_F1) {
+            shortcutSheet.open = false
+            event.accepted = true
+          }
+          return
+        }
+
         var pane = root.srcPane
         var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
         if (event.key === Qt.Key_Escape) {
@@ -1225,6 +1395,30 @@ Item {
         else if (ctrl && event.key === Qt.Key_M) { root.startTransfer(true) }
         else if (ctrl && event.key === Qt.Key_K) { root.checksum = !root.checksum }
         else if (ctrl && event.key === Qt.Key_B) { root.showLocations = !root.showLocations }
+        else if (ctrl && event.key === Qt.Key_H) {
+          root.showHidden = !root.showHidden
+          root.setNotice(root.showHidden ? "Showing hidden files" : "Hiding hidden files", "warn")
+        }
+        else if (ctrl && event.key === Qt.Key_F) { pane.beginFilter() }
+        else if (ctrl && event.key === Qt.Key_D) { root.togglePin(pane.dir) }
+        // F3 is the primary. This is a dual-pane commander and it already
+        // binds F2 to rename, which is the Norton/Midnight Commander map; in
+        // that map F3 is View, so preview was already named before it existed.
+        // Alt+Space is kept as the alias the request asked for -- it costs one
+        // clause, and somebody who reaches for it should not be told no.
+        else if (event.key === Qt.Key_F3
+                 || ((event.modifiers & Qt.AltModifier) !== 0 && event.key === Qt.Key_Space)) {
+          var f = pane.fileAtCursor()
+          if (f === "") root.setNotice("Nothing to preview here", "warn")
+          else { previewSheet.path = f; previewSheet.open = true }
+        }
+        else if (ctrl && event.key === Qt.Key_I) {
+          root.showIcons = !root.showIcons
+          root.setNotice(root.showIcons ? "Icons on" : "Icons off", "warn")
+        }
+        else if (event.key === Qt.Key_Question || event.key === Qt.Key_F1) {
+          shortcutSheet.open = !shortcutSheet.open
+        }
         else if (ctrl && event.key === Qt.Key_Z) { root.undoLast() }
         else if (event.key === Qt.Key_Delete) { root.deleteSelection() }
         else if (event.key === Qt.Key_F2) { root.renameSelection() }
@@ -1249,6 +1443,10 @@ Item {
           if (pane.dir === before) root.openSelection()
         }
         else if (event.key === Qt.Key_Backspace) { pane.goUp() }
+        else if ((event.modifiers & Qt.AltModifier) !== 0
+                 && event.key === Qt.Key_Left) { pane.goBack() }
+        else if ((event.modifiers & Qt.AltModifier) !== 0
+                 && event.key === Qt.Key_Right) { pane.goForward() }
         else return
         event.accepted = true
       }

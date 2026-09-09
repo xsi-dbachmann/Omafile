@@ -124,6 +124,18 @@ pub enum Request {
     /// harmless no-op: an in-flight Job keeps re-inserting itself on its next
     /// progress tick regardless.
     Release { id: u64, job: String },
+    /// How much the filesystem containing `path` can still hold.
+    ///
+    /// Asked about a *path*, not a mount point, because the caller knows where
+    /// it wants to write and not which filesystem that lands on — resolving
+    /// one to the other is `statvfs`'s job and doing it in the plugin would
+    /// mean parsing mount tables to answer a question the kernel answers.
+    ///
+    /// Paired with a Job's summed source size this is a refusal that happens
+    /// before the first byte is written, which is the only kind worth having:
+    /// once a transfer has started, running out of space leaves a partial
+    /// result to reason about.
+    Space { id: u64, path: String },
 }
 
 impl Request {
@@ -138,6 +150,7 @@ impl Request {
             | Self::Restore { id, .. }
             | Self::Rename { id, .. }
             | Self::Release { id, .. }
+            | Self::Space { id, .. }
             | Self::Conflicts { id, .. } => *id,
         }
     }
@@ -253,6 +266,27 @@ pub enum Event {
     Renamed { seq: u64, id: u64, from: String, to: Option<String>, error: Option<String> },
     /// Bare filenames in `destination_dir` that already exist.
     Conflicts { seq: u64, id: u64, existing: Vec<String> },
+    /// What the filesystem containing `path` holds, in bytes.
+    ///
+    /// `available` is what an ordinary user can still write — `statvfs`'s
+    /// `f_bavail`, not `f_bfree`, which includes the reserve only root may
+    /// spend. A caller sizing a transfer against `f_bfree` would be told it
+    /// fits and then run out.
+    ///
+    /// Both numbers are absent, not zero, whenever `error` is set. Zero is a
+    /// full disk — a real answer somebody will act on — and handing it back for
+    /// "I could not tell" would have the caller refuse transfers that fit
+    /// perfectly well. `path` is echoed for the same reason `Renamed` echoes
+    /// `from`: a reply that says only "it failed" cannot be matched to what
+    /// was asked without the caller keeping its own book.
+    Space {
+        seq: u64,
+        id: u64,
+        path: String,
+        total: Option<u64>,
+        available: Option<u64>,
+        error: Option<String>,
+    },
     Progress { seq: u64, job: JobView },
     Finished { seq: u64, job: JobView },
     Failed { seq: u64, job: JobView },

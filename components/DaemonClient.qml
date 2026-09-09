@@ -59,6 +59,12 @@ Item {
   signal deleted(var info)      // { id, path, recoverable, trashedAs, info, error }
   signal restored(var info)     // { id, path, error }
   signal trashAvailability(string path, bool available)
+  /// What the filesystem holding `path` can still take. `available` is what
+  /// this user can write, not what exists -- the daemon reports f_bavail, and
+  /// the difference is the reserve only root may spend.
+  /// `available` is -1 when the daemon could not tell, which is not the same
+  /// as 0: 0 is a full disk and a caller must not refuse transfers on "unknown".
+  signal spaceReported(string path, real total, real available, string error)
   signal renamed(var info)      // { id, from, to, error }
   /// Which names would collide, and *which question* this answers. Every reply
   /// carries the id of the request it answers; dropping it meant a slow answer
@@ -117,6 +123,7 @@ Item {
   }
   function del(path) { return _send({ op: "delete", path: path }) }
   function canTrash(path) { return _send({ op: "cantrash", path: path }) }
+  function askSpace(path) { return _send({ op: "space", path: path }) }
   function rename(path, newName) {
     return _send({ op: "rename", path: path, new_name: newName })
   }
@@ -242,6 +249,12 @@ Item {
             break
           case "renamed":
             client.renamed({ id: m.id || 0, from: m.from, to: m.to || "", error: m.error || "" })
+            break
+          case "space":
+            client.spaceReported(m.path || "",
+                                 typeof m.total === "number" ? m.total : -1,
+                                 typeof m.available === "number" ? m.available : -1,
+                                 m.error || "")
             break
           case "trashavailable":
             client.trashAvailability(m.path, m.available === true)

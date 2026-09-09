@@ -25,6 +25,17 @@ Rectangle {
   property string timeText: ""
   /// True while the pane is pointing this row out because it just landed here.
   property bool flash: false
+  /// Whether the pane holding this row is the focused one. Focus is expressed
+  /// as brightness (issue 39), and a pane whose background dims while its text
+  /// stays at full strength looks like a rendering fault rather than a state:
+  /// the text has to recede with it. `dim` is the single factor every colour
+  /// here is multiplied through, so the two can never drift apart.
+  property bool paneActive: true
+  /// Icons on or off, from the window's persisted setting. Off falls back to
+  /// the original two characters, so turning them off is not a downgrade to
+  /// nothing -- it is the older, plainer row.
+  property bool showIcons: true
+  readonly property real dim: paneActive ? 1.0 : 0.55
 
   signal activated
   signal clicked(bool ctrl)
@@ -85,12 +96,40 @@ Rectangle {
     id: glyph
     anchors.verticalCenter: parent.verticalCenter
     anchors.left: parent.left
-    anchors.leftMargin: 8
-    width: 12
-    // Kept to plain characters so the row needs no icon font to be legible.
-    text: row.isDir ? "▸" : "·"
-    color: row.isDir ? Color.accent : Color.muted
+    anchors.leftMargin: 18
+    width: 14
+    // What the row IS. Whether it is *picked* is the mark to the left of this,
+    // and they were the same character until issue 36: three facts in one 8px
+    // glyph is why nobody could read any of them.
+    text: row.showIcons ? kinds.iconFor(row.fileName, row.isDir)
+                        : (row.isDir ? "▸" : "·")
+    // The Nerd Font by name, not by hoping the default family has the glyph: a
+    // missing codepoint renders as a tofu box, which is worse than the plain
+    // character this replaces. Omarchy's own bar already loads this family.
+    font.family: row.showIcons ? "JetBrainsMono Nerd Font" : nameLabel.font.family
+    color: row.isDir ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, row.dim)
+                     : Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, row.dim)
     font.pixelSize: 13
+  }
+
+  FileKind { id: kinds }
+
+  /// Picked, as a fact of its own.
+  ///
+  /// The row's background already tints when selected, but a tint is a weak
+  /// signal against a theme that may be light or dark, and it was carrying the
+  /// whole meaning. A mark says it outright, in a column the kind glyph does
+  /// not share.
+  Text {
+    id: pick
+    anchors.verticalCenter: parent.verticalCenter
+    anchors.left: parent.left
+    anchors.leftMargin: 6
+    width: 10
+    visible: row.selected
+    text: "✓"
+    color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, row.dim)
+    font.pixelSize: 11
   }
 
   Text {
@@ -106,7 +145,7 @@ Rectangle {
     // the destination pane where "Severance.S02E07.2160p.WEB-DL…" cannot.
     elide: Text.ElideMiddle
     text: row.fileName
-    color: Color.foreground
+    color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, row.dim)
     font.pixelSize: 13
   }
 
@@ -123,7 +162,7 @@ Rectangle {
     horizontalAlignment: Text.AlignRight
     elide: Text.ElideRight
     text: row.timeText
-    color: Color.muted
+    color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, row.dim)
     font.pixelSize: 11
   }
 
@@ -136,7 +175,7 @@ Rectangle {
     width: visible ? Math.max(implicitWidth, 44) : 0
     horizontalAlignment: Text.AlignRight
     text: row.sizeText
-    color: Color.muted
+    color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, row.dim)
     font.pixelSize: 12
   }
 
