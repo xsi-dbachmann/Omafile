@@ -262,6 +262,39 @@ QtObject {
     return b.toFixed(digits) + " " + units[i]
   }
 
+  /// What a filter is actually showing (issue 04).
+  ///
+  /// The strip used to read `folderModel.count + " shown"`, and
+  /// `FolderListModel.nameFilters` **does not apply to directories** — so a
+  /// filter matching nothing at all still listed every folder, and the strip
+  /// counted them. Typing `zzz` in a directory holding one folder and four
+  /// files read `1 shown`, about a row that had ignored what was typed.
+  ///
+  /// That is the one thing this strip exists not to do. It is on screen at all
+  /// (issue 17) because a pane that hides files without saying so is the
+  /// scrollbar bug again, and a count that includes what the filter never
+  /// touched is that same dishonesty inside the control built to prevent it.
+  ///
+  /// So it counts **files**, which is what the filter acts on. Folders staying
+  /// visible is deliberate — you are filtering to find something, and a filter
+  /// that also removed the way out would be worse than a noisy one; `showDirs`
+  /// would have hidden them all, including a folder named exactly what was
+  /// typed. That rule is stated in the shortcut sheet ("filter the files
+  /// here"), not here.
+  ///
+  /// **It is short on purpose.** The first version of this said
+  /// `0 files match · 1 folder not filtered`, which is truer still and cost the
+  /// input its width: measured at the 720 minimum on 2026-09-09, the count took
+  /// the whole strip and the `TextInput` beside it was squeezed to nothing, so
+  /// you could not see what you were typing. That is ADR 0014's collision
+  /// exactly, in a second control. A sentence in a shared line is charged to
+  /// whatever shares it.
+  function filterPhrase(fileCount) {
+    var f = Number(fileCount)
+    if (!isFinite(f) || f < 0) return ""
+    return f + (f === 1 ? " file matches" : " files match")
+  }
+
   /// How long a notice stays on screen, in milliseconds (issue 19 item 3).
   ///
   /// It was a flat 6000 for every string the bar writes. That constant was

@@ -804,7 +804,10 @@ Rectangle {
     Text {
       id: filterCount
       anchors { verticalCenter: parent.verticalCenter; right: parent.right; rightMargin: 14 }
-      text: folderModel.count + " shown"
+      // Files, not rows: `nameFilters` never applied to the folders, so counting
+      // them here claimed the filter had chosen a row it had ignored. See
+      // `Wording::filterPhrase()` for why the folders stay on screen at all.
+      text: pane.wording.filterPhrase(folderModel.count - pane.dirCount)
       color: Color.muted
       font.pixelSize: 11
     }

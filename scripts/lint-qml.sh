@@ -120,6 +120,58 @@ if [[ -n $bad_shield ]]; then
   exit 1
 fi
 
+# Issue 03 -- everything modalOpen disables the panes for must still be able to
+# answer a key.
+#
+# `modalOpen` gives both DirPanes `enabled: false`, and disabling an item
+# DESTROYS the active focus it holds. Focus is usually on `browser`, which owns
+# the one `Keys.onPressed`, but not always: after `DirPane::endFilter()` it sits
+# on a `FileRow`, where keys still work because they propagate up. Open an
+# overlay from that state and the focus goes away with the pane, the handler is
+# never reached again, and `Preview` goes on printing "Escape closes" while
+# Escape does nothing. Only a mouse click recovered it. Watched 2026-09-09; the
+# reproduction is four keystrokes, Ctrl+F Escape F1 Escape.
+#
+# There are two lawful ways for a thing in `modalOpen` to stay answerable, and
+# a component must use one of them:
+#
+#   * take focus itself, and give it back -- what the three dialogs do, via
+#     `onVisibleChanged: if (!visible) browser.forceActiveFocus()`; or
+#   * be listed in `overlayOpen`, which claims the focus for `browser` on the
+#     component's behalf.
+#
+# The check exists because these are two lists of the same fact, which is the
+# defect shape this repository has now found nine times. A seventh overlay added
+# to `modalOpen` and forgotten in `overlayOpen` reintroduces exactly this bug,
+# and it is invisible until somebody arrives by keyboard rather than by click.
+ids_of() {
+  awk -v marker="$1" '
+    index($0, marker) { grab = 1 }
+    grab && !index($0, marker) && $0 !~ /^[[:space:]]*\|\|/ { grab = 0 }
+    grab { print }
+  ' App.qml | grep -oE '[a-zA-Z_][a-zA-Z0-9_]*\.(visible|open)\b' | sed 's/\..*//' | sort -u
+}
+modal_ids="$(ids_of 'readonly property bool modalOpen:')"
+overlay_ids="$(ids_of 'readonly property bool overlayOpen:')"
+focus_ids="$(grep -B12 'onVisibleChanged: if (!visible) browser.forceActiveFocus()' App.qml \
+             | grep -oE '^[[:space:]]*id: [a-zA-Z_][a-zA-Z0-9_]*' | awk '{print $2}' | sort -u)"
+
+if [[ -z $modal_ids || -z $overlay_ids ]]; then
+  printf 'lint-qml: cannot read modalOpen/overlayOpen -- they changed shape.\n' >&2
+  exit 1
+fi
+
+stranded="$(comm -23 <(printf '%s\n' "$modal_ids") \
+                     <(printf '%s\n' "$overlay_ids" "$focus_ids" | sort -u))"
+if [[ -n $stranded ]]; then
+  printf '%s\n' "$stranded"
+  printf 'lint-qml: the above is disabled by modalOpen but can never answer a key (issue 03).\n' >&2
+  printf 'lint-qml: disabling a pane destroys the focus it holds, and nothing takes it back.\n' >&2
+  printf 'lint-qml: either take focus on open and restore it in onVisibleChanged, as the three\n' >&2
+  printf 'lint-qml: dialogs do, or add it to overlayOpen so browser claims the focus for it.\n' >&2
+  exit 1
+fi
+
 # Every _send's return must be checked.
 #
 # DaemonClient's senders return the request id, or **-1 if nothing was sent**,

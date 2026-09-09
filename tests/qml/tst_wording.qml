@@ -306,4 +306,34 @@ TestCase {
     verify(text.length > 50)
     verify(w.noticeLifeMs(text) > 6000)
   }
+
+  // Issue 04 -- the filter strip counted rows the filter never applied to.
+  // FolderListModel.nameFilters does not filter directories, so the count has
+  // to be of files. It is deliberately short: the longer version that also
+  // named the folders squeezed the TextInput beside it to nothing at the 720
+  // minimum, which is ADR 0014's collision in a second control.
+
+  function test_filter_counts_files_not_rows() {
+    // The reproduction: "zzz" in a directory of four files and one folder.
+    // The old strip said "1 shown", counting the folder it had not filtered.
+    compare(w.filterPhrase(0), "0 files match")
+  }
+
+  function test_filter_one_file_is_singular_and_agrees_with_its_verb() {
+    compare(w.filterPhrase(1), "1 file matches")
+  }
+
+  function test_filter_counts_several() {
+    compare(w.filterPhrase(4), "4 files match")
+  }
+
+  function test_filter_what_is_not_a_count_says_nothing() {
+    // Same rule as sizePhrase beside it: a value that is not a number says
+    // nothing. Deliberately not `""`, which Number() makes 0 -- sizePhrase
+    // reads it as zero too, and one guard behaving two ways in one file is
+    // worse than either behaviour.
+    compare(w.filterPhrase("nonsense"), "")
+    compare(w.filterPhrase(undefined), "")
+    compare(w.filterPhrase(-1), "")
+  }
 }

@@ -65,7 +65,11 @@ Rectangle {
           ["Ctrl+C / Ctrl+M", "copy / move to the other pane"],
           ["Ctrl+K", "checksum for the next transfer"],
           ["Ctrl+D", "pin this folder to the sidebar"],
-          ["Ctrl+F", "filter this folder"],
+          // "the files here", not "this folder": FolderListModel's nameFilters
+          // never applied to directories, so folders stay listed whatever is
+          // typed (issue 04). The strip counts files for the same reason, and
+          // is too narrow to say why -- so this is where the rule is stated.
+          ["Ctrl+F", "filter the files here"],
           ["Ctrl+H", "show hidden files"],
           ["Ctrl+I", "file-type icons on or off"],
           ["Ctrl+B", "show or hide the sidebar"],

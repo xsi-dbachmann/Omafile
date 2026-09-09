@@ -984,6 +984,34 @@ Item {
                                     || previewSheet.open || shortcutSheet.open
                                     || contextMenu.visible
 
+  /// The overlays that answer their keys through `browser`'s `Keys.onPressed`
+  /// instead of through a focus item of their own. The three dialogs are not
+  /// here on purpose: each takes focus when it asks and gives it back in
+  /// `onVisibleChanged`, and that difference is the whole of this bug.
+  ///
+  /// `modalOpen` disables both panes, and **disabling an item destroys the
+  /// active focus it holds**. Focus is usually on `browser`, but not always:
+  /// after `DirPane::endFilter()` it sits on a `FileRow`, where keys still work
+  /// because they propagate up to the handler. Open an overlay from *that*
+  /// state and the focus is thrown away with the pane, `Keys.onPressed` is
+  /// never reached again, and `Preview` goes on printing "Escape closes" while
+  /// Escape does nothing at all. Only a mouse click recovered it. Watched
+  /// 2026-09-09; the reproduction is four keystrokes, Ctrl+F Escape F1 Escape.
+  ///
+  /// So the overlay claims the focus the pane is about to lose. Keying this off
+  /// `modalOpen` instead would fire for the dialogs too and take the keyboard
+  /// away from the item currently asking the question -- the same defect from
+  /// the other end.
+  ///
+  /// `Qt.callLater` because this handler and `enabled: !root.modalOpen` are two
+  /// readers of one property change with no ordering between them: claiming the
+  /// focus first and disabling the pane second loses it again. The same reason
+  /// `activated()` is answered late further up.
+  readonly property bool overlayOpen: previewSheet.open || shortcutSheet.open
+                                      || contextMenu.visible
+  onOverlayOpenChanged: if (root.overlayOpen)
+                          Qt.callLater(function () { browser.forceActiveFocus() })
+
   readonly property var daemonBanner: {
     if (daemon.canTransfer)
       return { note: "omafiled " + daemon.daemonVersion + " · protocol ok", command: "" }
