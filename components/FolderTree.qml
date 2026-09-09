@@ -28,6 +28,10 @@ Item {
 
   /// Roots to show. `[{ name, path }]`.
   property var roots: []
+
+  /// A path is not a URL -- issue 06. The tree lists with the same type the
+  /// panes do, so it needs the same doubled encoding.
+  property PathUrl pathUrl: PathUrl {}
   property string currentDir: ""
   property bool showHidden: false
 
@@ -63,7 +67,7 @@ Item {
     if (rows.get(row).expanded) { tree._collapse(row); return }
     // Point the lister at it; the children arrive in _insertChildren().
     tree._pendingRow = row
-    lister.folder = "file://" + rows.get(row).path
+    lister.folder = tree.pathUrl.folderModelUrl(rows.get(row).path)
   }
 
   function _insertChildren() {

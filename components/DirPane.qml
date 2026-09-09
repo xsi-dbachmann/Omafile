@@ -20,10 +20,18 @@ Rectangle {
   /// second time -- there is one `findmnt` poll for both panes, not two.
   property var places: []
   property var mounts: []
-  property alias count: folderModel.count
+  /// How many rows this pane has, which is not always how many the model has.
+  /// See `listingIsOurs`: a model listing somewhere else has no rows that
+  /// belong to this pane, whatever it says it counted.
+  readonly property int count: pane.listingIsOurs ? folderModel.count : 0
   /// The pane's arithmetic-bearing sentences. `Wording` imports QtQuick and
   /// nothing else, which is what lets `qmltestrunner` hold it (issue 26).
   property Wording wording: Wording {}
+  /// A path is not a URL. `PathUrl` is the one place that difference is paid
+  /// for, and `folderModelUrl` rather than `fileUrl` because this one Qt type
+  /// decodes twice -- issue 06, where `track #1` opened nothing and said so
+  /// nowhere.
+  property PathUrl pathUrl: PathUrl {}
   /// The keyboard cursor. Exposed so the window can drive a pane without
   /// depending on where Qt happens to have put focus.
   property alias cursorIndex: list.currentIndex
@@ -60,7 +68,7 @@ Rectangle {
   /// expression.
   function selectedBytes() {
     var total = 0
-    for (var i = 0; i < folderModel.count; i++) {
+    for (var i = 0; i < pane.count; i++) {
       if (folderModel.get(i, "fileIsDir")) continue
       if (pane.selection.indexOf(String(folderModel.get(i, "fileName"))) === -1) continue
       total += Number(folderModel.get(i, "fileSize")) || 0
@@ -85,6 +93,10 @@ Rectangle {
   property string _lastDir: ""
 
   onDirChanged: {
+    // Rows belonging to the directory we just left are not this one's. Checked
+    // before the early return, because a back/forward replay changes directory
+    // too. See `listingIsOurs`.
+    pane._checkListing()
     if (pane._replaying) { pane._lastDir = pane.dir; return }
     if (pane._lastDir !== "" && pane._lastDir !== pane.dir) {
       // Capped. A session that browses for hours should not accumulate an
@@ -224,8 +236,12 @@ Rectangle {
   ///
   /// Derived from `Color.background` rather than written down, so it follows
   /// the user's theme and satisfies the lint's no-literal-colours rule.
-  color: pane.active ? Qt.lighter(Color.background, 1.45)
-                     : Qt.darker(Color.background, 1.25)
+  /// Named, because `FileRow` has to measure its text against the exact colour
+  /// this paints (issue 05). Two expressions for one surface is how a row ends
+  /// up computing legibility against a background it is not actually on.
+  readonly property color surface: pane.active ? Qt.lighter(Color.background, 1.45)
+                                               : Qt.darker(Color.background, 1.25)
+  color: pane.surface
 
   /// A file's size, as `Wording::sizePhrase()` decides it: decimal, so the
   /// number here and the daemon's exact byte count reconcile in the head
@@ -283,7 +299,7 @@ Rectangle {
 
   function selectAllFiles() {
     var next = []
-    for (var i = 0; i < folderModel.count; i++) {
+    for (var i = 0; i < pane.count; i++) {
       if (!folderModel.get(i, "fileIsDir"))
         next.push(String(folderModel.get(i, "fileName")))
     }
@@ -298,7 +314,7 @@ Rectangle {
   function moveCursor(delta) {
     var n = list.currentIndex + delta
     if (n < 0) n = 0
-    if (n >= folderModel.count) n = folderModel.count - 1
+    if (n >= pane.count) n = pane.count - 1
     list.currentIndex = n
   }
 
@@ -306,13 +322,13 @@ Rectangle {
   /// nothing. Preview is a per-file gesture and a folder has nothing to show.
   function fileAtCursor() {
     var i = list.currentIndex
-    if (i < 0 || i >= folderModel.count) return ""
+    if (i < 0 || i >= pane.count) return ""
     if (folderModel.get(i, "fileIsDir")) return ""
     return String(folderModel.get(i, "filePath"))
   }
 
   function moveCursorHome() { list.currentIndex = 0 }
-  function moveCursorEnd() { list.currentIndex = folderModel.count - 1 }
+  function moveCursorEnd() { list.currentIndex = pane.count - 1 }
 
   /// A page is however many rows the list actually shows, not a constant --
   /// the pane's height is not fixed (ADR 0014 made the divider draggable), and
@@ -346,7 +362,7 @@ Rectangle {
   /// yet make.
   function selectedPaths() {
     var out = []
-    for (var i = 0; i < folderModel.count; i++) {
+    for (var i = 0; i < pane.count; i++) {
       var n = String(folderModel.get(i, "fileName"))
       if (isSelected(n) && !folderModel.get(i, "fileIsDir"))
         out.push(String(folderModel.get(i, "filePath")))
@@ -362,7 +378,7 @@ Rectangle {
   /// and Delete and then returned without doing or saying anything. Arming and
   /// acting have to be the same expression, so this is that expression.
   ///
-  /// Safe to call from a binding: it reads `selection` and `folderModel.count`,
+  /// Safe to call from a binding: it reads `selection` and `pane.count`,
   /// so the binding re-evaluates when either changes.
   function selectedFileCount() { return selectedPaths().length }
 
@@ -370,7 +386,7 @@ Rectangle {
   /// is refusing needs to be able to say *why* it is refusing, and "you picked
   /// a folder" is a different sentence from "you picked nothing".
   readonly property bool containsDir: {
-    for (var i = 0; i < folderModel.count; i++) {
+    for (var i = 0; i < pane.count; i++) {
       var n = String(folderModel.get(i, "fileName"))
       if (isSelected(n) && folderModel.get(i, "fileIsDir")) return true
     }
@@ -384,7 +400,7 @@ Rectangle {
   /// asks for something that will be refused.
   readonly property int dirCount: {
     var n = 0
-    for (var i = 0; i < folderModel.count; i++)
+    for (var i = 0; i < pane.count; i++)
       if (folderModel.get(i, "fileIsDir")) n++
     return n
   }
@@ -401,7 +417,7 @@ Rectangle {
   }
 
   function indexOfName(name) {
-    for (var i = 0; i < folderModel.count; i++) {
+    for (var i = 0; i < pane.count; i++) {
       if (String(folderModel.get(i, "fileName")) === name) return i
     }
     return -1
@@ -487,7 +503,7 @@ Rectangle {
   }
 
   function enter(index) {
-    if (index < 0 || index >= folderModel.count) return
+    if (index < 0 || index >= pane.count) return
     if (!folderModel.get(index, "fileIsDir")) return
     pane.dir = String(folderModel.get(index, "filePath"))
     clearSelection()
@@ -503,7 +519,7 @@ Rectangle {
 
   FolderListModel {
     id: folderModel
-    folder: "file://" + pane.dir
+    folder: pane.pathUrl.folderModelUrl(pane.dir)
     showDirsFirst: true
     // Substring, not a glob the user has to know they are writing. Someone
     // typing "img" means "anything with img in it", and requiring *img* would
@@ -515,13 +531,88 @@ Rectangle {
     showDotAndDotDot: false
     showHidden: pane.showHidden
     onFolderChanged: {
+      pane._checkListing()
       pane.clearSelection()
       // A reveal is about one directory. Leaving it armed across a navigation
       // would flash a same-named file somewhere else.
       revealRetry.stop()
       pane.pendingReveal = []
       pane.revealed = []
+      // A new folder is innocent until it has had its 1500 ms.
+      pane.notAnswering = false
+      openWatch.restart()
     }
+    onStatusChanged: {
+      pane._checkListing()
+      if (folderModel.status === FolderListModel.Ready && pane.listingIsOurs) {
+        pane.notAnswering = false
+        openWatch.stop()
+      }
+    }
+    onCountChanged: pane._checkListing()
+    // A pane summoned straight at an unopenable directory never *changes*
+    // folder and never changes status either -- it is born at `Null` and stays
+    // there in silence, which is precisely the case this is for. Watched
+    // failing: with only the two handlers above, a pane opened on a missing
+    // path said nothing at all, exactly as before the fix.
+    Component.onCompleted: { pane._checkListing(); openWatch.restart() }
+  }
+
+  /// Whether the model is listing the directory this pane was asked for.
+  ///
+  /// It is not always. `FolderListModel` resolves an **empty** folder to the
+  /// process's working directory -- `DirPane` already knew that, one screen up,
+  /// about the breadcrumb -- and a pane is born with `dir: ""`, so the first
+  /// thing every pane in this window ever lists is `~`. Normally the real path
+  /// arrives and it re-lists. Assign one it cannot open while that first
+  /// listing is still in flight and the `~` rows **stay**, arriving at `Ready`
+  /// under the new folder's name: fifty rows of somebody's home directory
+  /// beneath a breadcrumb reading `no-such-folder-here`, with every control
+  /// live (issue 07). A race, so it is intermittent, which is why review never
+  /// saw it.
+  ///
+  /// So the pane asks the only question that settles it: does the first row
+  /// live under `dir`? Everything else in here counts through `pane.count`,
+  /// which is zero when the answer is no -- the guard is one expression and
+  /// nothing has to remember to consult it.
+  ///
+  /// Recomputed rather than bound: `get(0, …)` is a function call, not a
+  /// dependency Qt will re-evaluate a binding for.
+  property bool listingIsOurs: false
+  function _checkListing() {
+    if (pane.dir === "") { pane.listingIsOurs = false; return }
+    if (folderModel.count === 0 || folderModel.status !== FolderListModel.Ready) {
+      // Nothing to disown yet. An empty *real* directory is ours; one that has
+      // not answered has no rows either way, and `notAnswering` is what speaks
+      // for that case.
+      pane.listingIsOurs = folderModel.status === FolderListModel.Ready
+      return
+    }
+    var prefix = pane.dir === "/" ? "/" : pane.dir + "/"
+    pane.listingIsOurs = String(folderModel.get(0, "filePath")).indexOf(prefix) === 0
+  }
+
+  /// The third state the pane had no words for.
+  ///
+  /// "Empty folder" is only ever said at `Ready`, and a folder that cannot be
+  /// resolved never gets there -- so `track #1` drew an empty list under a
+  /// breadcrumb naming it and said nothing at all (issue 06).
+  ///
+  /// It has to be a wait rather than a status test. A directory that loads
+  /// passes through `Loading`, but one that cannot be resolved is born at
+  /// `Null` and emits **no status change at all**, so there is no signal whose
+  /// arrival means "did not open" -- only the absence of the one that means it
+  /// did.
+  ///
+  /// 1500 ms is ten times the 146 ms a 50,000-entry listing took (issue 02),
+  /// the largest load this project has measured. A folder slower than that
+  /// gets the sentence early, which is why the sentence reports the
+  /// observation -- nothing has come back -- rather than a diagnosis.
+  property bool notAnswering: false
+  Timer {
+    id: openWatch
+    interval: 1500
+    onTriggered: pane.notAnswering = !pane.listingIsOurs
   }
 
   // The active pane is marked with an accent edge rather than a border: a box
@@ -714,7 +805,7 @@ Rectangle {
       // not what a control would act on -- which is why scripts/lint-qml.sh
       // exempts this file and only this file.
       text: {
-        var files = folderModel.count - pane.dirCount
+        var files = pane.count - pane.dirCount
         var picked = pane.selectedFileCount()
         if (pane.selection.length > 0)
           return picked + " file" + (picked === 1 ? "" : "s") + " of " + files
@@ -751,8 +842,18 @@ Rectangle {
   /// blank pane. Says which.
   Text {
     anchors.centerIn: list
-    visible: folderModel.count === 0 && folderModel.status === FolderListModel.Ready
+    visible: pane.count === 0 && pane.listingIsOurs
+            && folderModel.status === FolderListModel.Ready
     text: pane.showHidden ? "Empty folder" : "Nothing here — Ctrl+H shows hidden files"
+    color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, pane.active ? 1.0 : 0.55)
+    font.pixelSize: 12
+  }
+
+  /// And the third: asked for, never answered.
+  Text {
+    anchors.centerIn: list
+    visible: pane.notAnswering && !pane.listingIsOurs
+    text: "Nothing came back from this folder — it may be gone, or unreadable"
     color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, pane.active ? 1.0 : 0.55)
     font.pixelSize: 12
   }
@@ -807,7 +908,7 @@ Rectangle {
       // Files, not rows: `nameFilters` never applied to the folders, so counting
       // them here claimed the filter had chosen a row it had ignored. See
       // `Wording::filterPhrase()` for why the folders stay on screen at all.
-      text: pane.wording.filterPhrase(folderModel.count - pane.dirCount)
+      text: pane.wording.filterPhrase(pane.count - pane.dirCount)
       color: Color.muted
       font.pixelSize: 11
     }
@@ -823,7 +924,9 @@ Rectangle {
     enabled: !goMenu.open
     anchors { top: filterBar.bottom; bottom: parent.bottom; left: parent.left; right: parent.right }
     clip: true
-    model: folderModel
+    /// Not `folderModel` unconditionally: a listing that is not ours must not
+    /// be on screen, let alone clickable (issue 07).
+    model: pane.listingIsOurs ? folderModel : null
     focus: pane.active
     highlightMoveDuration: 0
 
@@ -852,6 +955,7 @@ Rectangle {
       required property int index
 
       width: list.width
+      surface: pane.surface
       fileName: model.fileName
       isDir: model.fileIsDir
       selected: pane.isSelected(model.fileName)

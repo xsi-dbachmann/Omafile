@@ -17,6 +17,7 @@
 | [0013](0013-conflict-resolution.md) | Ask before overwriting; report what was replaced |
 | [0014](0014-the-pixel-budget.md) | A notice row, draggable boundaries, a header that counts both |
 | [0015](0015-listing-is-threaded-completion-is-not.md) | Listing does not block the UI; path completion still wants the daemon |
+| [0016](0016-a-path-is-not-a-url.md) | A path is not a URL; a pane trusts only rows that live under its own `dir` |
 
 ADR 0004 extends 0003's tier table with a fourth tier. ADR 0008 completes 0003,
 and carries an implementation note about a decision that predated anything able

@@ -43,6 +43,10 @@ Rectangle {
   readonly property int textCap: 65536
 
   FileKind { id: kinds }
+  /// `fileUrl`, not `folderModelUrl`: `Image` parses a URL the way the standard
+  /// says, so it takes the correct one and rejects the doubled form. The two
+  /// are different strings and the difference was measured (issue 06).
+  PathUrl { id: pathUrl }
   readonly property string ext: kinds.extensionOf(sheet.fileName)
   readonly property bool isImage: ["jpg","jpeg","png","gif","webp","bmp","svg"].indexOf(sheet.ext) !== -1
   readonly property bool isText: ["txt","md","log","csv","json","toml","yaml","yml",
@@ -100,7 +104,7 @@ Rectangle {
       // decoded at full resolution to be drawn 600px wide.
       sourceSize.width: Math.max(1, body.width)
       sourceSize.height: Math.max(1, body.height)
-      source: sheet.open && sheet.isImage ? "file://" + sheet.path : ""
+      source: sheet.open && sheet.isImage ? pathUrl.fileUrl(sheet.path) : ""
     }
 
     Flickable {

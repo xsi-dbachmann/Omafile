@@ -32,6 +32,31 @@ version="$("$RUNNER" -help 2>&1 | head -1)"
   exit 2
 }
 
+# The one fixture that cannot be a string.
+#
+# `tst_pathurl.qml` asserts that two Qt sinks want two different encodings of
+# the same path, and that claim is only worth anything if real directories and
+# real images are on the other end of it. The names carry the three characters
+# a URL reads as syntax, so they are made here rather than committed: `q?mark`
+# in a published tarball is a gift to nobody, and `/tmp/omafile-auto/` is where
+# this project's files are allowed to live.
+#
+# Rebuilt every run. The test names this path itself and fails — rather than
+# skips — if it is not here, so the two must not drift.
+fixture=/tmp/omafile-auto/pathurl-fixture
+rm -rf "$fixture"
+mkdir -p "$fixture"
+for name in 'h#hash' 'q?mark' 'p%cent' 'plain' 'sp ace' 'Grüße & Küsse' '日本語' \
+            'a&amp' 'pl+us'; do
+  mkdir -p "$fixture/$name"
+  printf 'x' > "$fixture/$name/found.txt"
+done
+# A 1x1 PNG, so `Image` has something it will actually decode.
+png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+for name in 'plain.png' 'sp ace.png' 'h#hash.png' 'q?mark.png' 'p%cent.png' 'Grüße.png'; do
+  printf '%s' "$png" | base64 -d > "$fixture/$name"
+done
+
 cd "$project_dir/tests/qml"
 
 # Offscreen, so this runs over ssh, in a hook, and in a session with the monitor

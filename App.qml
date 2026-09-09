@@ -1012,9 +1012,32 @@ Item {
   onOverlayOpenChanged: if (root.overlayOpen)
                           Qt.callLater(function () { browser.forceActiveFocus() })
 
+  /// The version of the plugin **that is running**, which is not always the
+  /// version on disk.
+  ///
+  /// A literal, deliberately, and this is the whole point of it. The plugin is
+  /// usually installed as a symlink into a working tree (`scripts/link-plugin.sh`),
+  /// so `manifest.json` is whatever was last written there — while the shell
+  /// went on running the QML it loaded at start-up. On 2026-09-09 that gap was
+  /// **seven and a half hours and three releases**: the files said 1.2.2 and the
+  /// window was running pre-1.2.0 code, which is exactly how "is my Super+E
+  /// version the current one?" becomes unanswerable from inside the window.
+  ///
+  /// Reading `manifest.json` at runtime would have reported 1.2.2 in that
+  /// window. A version indicator that reports the file rather than the process
+  /// is worse than none: it answers the question confidently and wrongly, which
+  /// is the defect shape this project keeps finding. A literal is read when the
+  /// QML is loaded, so it is by construction the version of the code you are
+  /// looking at.
+  ///
+  /// The cost is one fact in two places, so `scripts/lint-qml.sh` asserts this
+  /// equals `manifest.json`.
+  readonly property string appVersion: "1.3.0"
+
   readonly property var daemonBanner: {
     if (daemon.canTransfer)
-      return { note: "omafiled " + daemon.daemonVersion + " · protocol ok", command: "" }
+      return { note: "Omafile " + root.appVersion + " · omafiled "
+                     + daemon.daemonVersion + " · protocol ok", command: "" }
     if (daemon.incompatible !== "")
       return { note: daemon.incompatible, command: "" }
     if (daemon.attached)
@@ -1472,7 +1495,7 @@ Item {
               : ""
       }
 
-      Shortcuts { id: shortcutSheet }
+      Shortcuts { id: shortcutSheet; version: root.appVersion }
 
       Preview { id: previewSheet }
 

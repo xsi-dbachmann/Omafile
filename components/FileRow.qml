@@ -37,6 +37,32 @@ Rectangle {
   property bool showIcons: true
   readonly property real dim: paneActive ? 1.0 : 0.55
 
+  /// The colour actually behind this row's text, which is what legibility is
+  /// measured against. Passed in because a row cannot see its pane's
+  /// background, and guessing it is how a size column ends up invisible.
+  property color surface: Color.background
+
+  /// Issue 05. `dim` used to be an ALPHA -- `Qt.rgba(Color.muted.r, .g, .b,
+  /// 0.55)` -- which composites toward whatever is behind. On a dark ground
+  /// that moves a light grey toward black and the gap survives; on a light one
+  /// it moves a mid grey toward near-white and the gap closes. Measured under
+  /// Flexoki Light: the Modified and Size columns came out at **1.0:1**, text
+  /// the same luminance as its row. One operation, opposite outcomes, decided
+  /// by a theme this component never sees.
+  ///
+  /// Receding is now expressed as less contrast against `surface`, which means
+  /// the same thing on both grounds, with a floor it will not go below. The
+  /// floors differ because the columns do: a file's name is what you read, its
+  /// time and size are what you check.
+  ///
+  /// `Contrast` is imported for the arithmetic and tested without a display,
+  /// for the same reason `Wording` is.
+  readonly property color nameColor: fileContrast.recede(Color.foreground, row.surface, 1 - row.dim, 3.5)
+  readonly property color metaColor: fileContrast.recede(Color.muted, row.surface, 1 - row.dim, 2.5)
+  readonly property color kindColor: fileContrast.recede(Color.accent, row.surface, 1 - row.dim, 2.5)
+
+  Contrast { id: fileContrast }
+
   signal activated
   signal clicked(bool ctrl)
   signal contextRequested(real gx, real gy)
@@ -107,8 +133,7 @@ Rectangle {
     // missing codepoint renders as a tofu box, which is worse than the plain
     // character this replaces. Omarchy's own bar already loads this family.
     font.family: row.showIcons ? "JetBrainsMono Nerd Font" : nameLabel.font.family
-    color: row.isDir ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, row.dim)
-                     : Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, row.dim)
+    color: row.isDir ? row.kindColor : row.metaColor
     font.pixelSize: 13
   }
 
@@ -128,7 +153,7 @@ Rectangle {
     width: 10
     visible: row.selected
     text: "✓"
-    color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, row.dim)
+    color: row.kindColor
     font.pixelSize: 11
   }
 
@@ -145,7 +170,7 @@ Rectangle {
     // the destination pane where "Severance.S02E07.2160p.WEB-DL…" cannot.
     elide: Text.ElideMiddle
     text: row.fileName
-    color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, row.dim)
+    color: row.nameColor
     font.pixelSize: 13
   }
 
@@ -162,7 +187,7 @@ Rectangle {
     horizontalAlignment: Text.AlignRight
     elide: Text.ElideRight
     text: row.timeText
-    color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, row.dim)
+    color: row.metaColor
     font.pixelSize: 11
   }
 
@@ -175,7 +200,7 @@ Rectangle {
     width: visible ? Math.max(implicitWidth, 44) : 0
     horizontalAlignment: Text.AlignRight
     text: row.sizeText
-    color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, row.dim)
+    color: row.metaColor
     font.pixelSize: 12
   }
 

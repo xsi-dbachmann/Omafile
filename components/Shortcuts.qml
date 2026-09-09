@@ -16,6 +16,10 @@ import qs.Commons
 Rectangle {
   id: sheet
 
+  /// The running plugin version, passed in from App.qml. See the note beside
+  /// the line that draws it.
+  required property string version
+
   property bool open: false
 
   anchors.fill: parent
@@ -41,6 +45,24 @@ Rectangle {
       color: Color.foreground
       font.pixelSize: 15
       font.bold: true
+    }
+
+    /// Which Omafile you are actually looking at.
+    ///
+    /// It is here rather than in the panel's status line because that line is
+    /// shared with the daemon's sentence, and ADR 0014's rule is that a
+    /// sentence in a shared line is charged to whatever shares it -- the
+    /// first-run instruction is long and must not be elided to make room for a
+    /// version. This sheet costs no width and is where you look a thing up.
+    ///
+    /// `version` is a literal in App.qml, not a runtime read of manifest.json,
+    /// so it names the code that is RUNNING. The two differ whenever the plugin
+    /// is a symlink into a working tree and the shell has not been restarted --
+    /// seven hours and three releases apart, on the day this was added.
+    Text {
+      text: "Omafile " + sheet.version
+      color: Color.muted
+      font.pixelSize: 11
     }
 
     Grid {

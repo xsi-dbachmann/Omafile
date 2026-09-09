@@ -172,6 +172,37 @@ if [[ -n $stranded ]]; then
   exit 1
 fi
 
+# The version the window states must be the version the package claims.
+#
+# `App.qml`'s `appVersion` is a LITERAL on purpose: it is read when the QML is
+# loaded, so it names the code that is running rather than the file on disk.
+# That distinction is the reason it exists. The plugin is usually installed as a
+# symlink into a working tree, so `manifest.json` is whatever was last written
+# there while the shell goes on running what it loaded at start-up -- on
+# 2026-09-09 that gap was seven and a half hours and three releases, and it is
+# what made "is my Super+E version the current one?" unanswerable from inside
+# the window. Reading manifest.json at runtime would have answered it
+# confidently and wrongly.
+#
+# The cost of that choice is one fact in two places, which is this project's
+# signature defect. So the two are asserted equal here, on every run: bump
+# manifest.json without bumping appVersion and the window will state the old
+# number forever, which is worse than stating none.
+mv_manifest="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' manifest.json | head -1)"
+mv_qml="$(sed -n 's/.*readonly property string appVersion:[[:space:]]*"\([^"]*\)".*/\1/p' App.qml | head -1)"
+if [[ -z $mv_manifest || -z $mv_qml ]]; then
+  printf 'lint-qml: cannot read the version pairing (manifest=%s appVersion=%s).\n' \
+    "${mv_manifest:-?}" "${mv_qml:-?}" >&2
+  exit 1
+fi
+if [[ $mv_manifest != "$mv_qml" ]]; then
+  printf 'lint-qml: the window would state a version the package does not ship.\n' >&2
+  printf '  manifest.json           version    = %s\n' "$mv_manifest" >&2
+  printf '  App.qml  appVersion                = %s\n' "$mv_qml" >&2
+  printf 'lint-qml: appVersion is a literal so it names the RUNNING code; bump it with the manifest.\n' >&2
+  exit 1
+fi
+
 # Every _send's return must be checked.
 #
 # DaemonClient's senders return the request id, or **-1 if nothing was sent**,
