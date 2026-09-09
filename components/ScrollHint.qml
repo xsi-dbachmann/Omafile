@@ -22,6 +22,36 @@ import qs.Commons
 // The thumb thickens while hovered or dragged, so the target announces itself
 // rather than being a 3px line you are expected to guess at.
 //
+// "scrolling is still super cumbersome … keep control during dragging as long
+// as the bar is clicked, no matter where the mouse travels" — and the cause was
+// not the one that looked obvious. Instrumented on 2026-09-09 against a 50,000
+// row directory, with a probe on this MouseArea and another on `FileRow`'s
+// `DragHandler`: a drag begun **on the thumb** already survives wandering 184px
+// sideways and out of the pane entirely, and the row's DragHandler never
+// activates. `preventStealing` was doing its job.
+//
+// What actually failed was **missing the thumb**. At 50,000 rows the thumb is
+// its 18px minimum, so the press lands on the track more often than not — and a
+// track press set `onThumb = false`, after which `onPositionChanged` returned
+// early and the drag was *ignored altogether*. The log is unambiguous: `bar
+// pressed onThumb=false` and then not one move event. Grabbing a hair off
+// target did not scroll badly, it did nothing, which is what "loses control"
+// describes from the outside.
+//
+// Three changes, in order of how much they mattered:
+//
+//   1. **The thumb is at least 32px**, not 18. It was unaimable exactly when a
+//      list is long enough to need it.
+//   2. **A press anywhere on the track that then moves takes the thumb.** The
+//      thumb centres on the pointer and the drag carries on from there, so the
+//      gesture is never silently discarded.
+//   3. **It is drawn wider** — 8px at rest, 11px live — because people aim at
+//      what they can see, and 3px was asking them to aim at a hairline. Still
+//      inside the 16px gutter, so it still costs no layout width.
+//
+// A click that does *not* move still pages, unchanged: that behaviour is
+// deliberate and documented below, and a drag is not a click.
+//
 // Drawn here rather than pulled from QtQuick.Controls so it takes its colour
 // from the theme like everything else in this window.
 //
@@ -39,7 +69,7 @@ Item {
                                       && hint.list.height > 0
   readonly property real trackHeight: hint.list.height
   readonly property real thumbHeight: hint.list.contentHeight > 0
-    ? Math.max(18, hint.trackHeight * (hint.trackHeight / hint.list.contentHeight))
+    ? Math.max(32, hint.trackHeight * (hint.trackHeight / hint.list.contentHeight))
     : 0
   /// How far the content can travel, and how far the thumb can, in the same
   /// order. Both are needed in three places; computing them twice is how a
@@ -58,9 +88,9 @@ Item {
   Rectangle {
     id: thumb
     anchors.right: parent.right
-    anchors.rightMargin: 3
-    // Thin at rest, thicker under the pointer: the target says it is one.
-    width: (mouse.containsMouse || mouse.pressed) ? 6 : 3
+    anchors.rightMargin: 2
+    // Wide enough to aim at, wider under the pointer: the target says it is one.
+    width: (mouse.containsMouse || mouse.pressed) ? 11 : 8
     radius: width / 2
     height: hint.thumbHeight
     y: hint.maxContentY > 0
@@ -100,15 +130,41 @@ Item {
     property real grabY: 0
     property real grabContentY: 0
     property bool onThumb: false
+    /// Whether this press has become a drag. It is what separates a click on
+    /// the track (which pages) from a drag begun on the track (which scrolls),
+    /// so the two gestures can share one press without either being guessed at.
+    property bool dragging: false
 
     onPressed: function (m) {
       mouse.onThumb = m.y >= thumb.y && m.y <= thumb.y + thumb.height
+      mouse.dragging = false
       mouse.grabY = m.y
       mouse.grabContentY = hint.list.contentY
     }
 
     onPositionChanged: function (m) {
-      if (!mouse.pressed || !mouse.onThumb || hint.maxThumbY <= 0) return
+      if (!mouse.pressed || hint.maxThumbY <= 0) return
+
+      // Pressed the track rather than the thumb, and then moved. This used to
+      // return here and throw the whole gesture away, which is the bug: at
+      // 50,000 rows the thumb is 32px of a 900px track, so the press lands on
+      // the track most times somebody reaches for it.
+      //
+      // Take the thumb to the pointer once, then carry on as an ordinary drag.
+      // The 3px threshold is what keeps a click a click -- a press that never
+      // really moves still pages, and a hand that shakes by a pixel does not
+      // silently reposition the list.
+      if (!mouse.onThumb && !mouse.dragging) {
+        if (Math.abs(m.y - mouse.grabY) < 3) return
+        var centred = Math.max(0, Math.min(hint.maxThumbY, m.y - hint.thumbHeight / 2))
+        mouse.grabContentY = (centred / hint.maxThumbY) * hint.maxContentY
+        mouse.grabY = m.y
+        mouse.dragging = true
+        hint.list.contentY = mouse.grabContentY
+        return
+      }
+
+      mouse.dragging = true
       // A delta from where the grab began, never the pointer's absolute
       // position: anchoring to the pointer makes the thumb jump under the
       // cursor on the first pixel of movement.
@@ -120,8 +176,11 @@ Item {
     /// Clicking the track pages toward the click, the way a scrollbar does.
     /// Never jumps to the position: a page is undoable by clicking the other
     /// side of the thumb, and a jump loses your place with no way back.
+    ///
+    /// A drag is not a click, so a gesture that moved has already scrolled and
+    /// must not also page -- that would undo the drag the moment it ended.
     onClicked: function (m) {
-      if (mouse.onThumb) return
+      if (mouse.onThumb || mouse.dragging) return
       if (m.y < thumb.y)
         hint.list.contentY = Math.max(0, hint.list.contentY - hint.list.height)
       else
