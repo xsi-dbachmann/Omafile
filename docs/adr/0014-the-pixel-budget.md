@@ -1,6 +1,6 @@
 # ADR 0014 — The pixel budget: a notice row, draggable boundaries, and a header that counts both
 
-**Status**: Accepted (2026-09-08)
+**Status**: Accepted (2026-09-08), amended 2026-09-09 (see the amendment below)
 
 ## Context
 
@@ -104,3 +104,75 @@ judged against five concrete tasks and remains the right answer to "source and
 destination selection is not usable" — but it is a feature, and this ADR is a
 budget. Draggable boundaries were chosen first because they are what makes the
 door's eventual 36 px affordable.
+
+## Amendment (2026-09-09) — how long a notice lives, and what a size says
+
+This ADR gave the notice **room** and said nothing about **time**, and it set the
+size column's 52 px without saying what goes in it. Issue 19's last two items are
+both that omission, found by the first person to drive the UI.
+
+### 4. A notice lives as long as its sentence
+
+The lifetime was a flat 6000 ms, inherited from rank 2, whose defect was a
+present-tense string that never cleared. That constant was therefore tuned for
+*dismissal*, and nothing has ever tuned it for *reading* — while decision 1
+above deliberately made the sentences longer, by giving them 690 px to be long
+in. The user, on the copy they had just run: *"message disappeared shortly
+after, could not manage to get exact message read."*
+
+**`Wording::noticeLifeMs()` = 2000 ms + 80 ms a character, floored at 4 s, capped
+at 14 s.** 80 ms a character is about 150 words a minute, which is
+reading-off-a-screen speed. **50 characters lands on exactly 6000**, so the
+short notices the old constant was chosen around are unchanged; only the long
+ones stay longer.
+
+Rejected: **pausing the timer on hover.** It asks the reader to reach for the
+mouse to finish a sentence, in a product whose own keyboard-first argument this
+ADR's decision 1 rests on.
+
+Rejected: **a larger flat constant.** It buys the completion sentence its time by
+leaving every two-word refusal on screen just as long, which is how a bar becomes
+the status line the timer exists to prevent.
+
+Rejected: **"the transfer-panel row is the durable record, so the notice is only
+a nudge."** True for Jobs, and false for everything else: the notice is the only
+channel the product has for a delete, an undo, or a refusal, none of which ever
+get a panel row.
+
+### 5. A size is decimal
+
+The size column divided by 1024 and labelled the answer `KB`/`MB`, so a
+3,000,000-byte file read **`2.9 MB`** in the pane while its own transfer-panel
+row, in the same window, read **`3000000 bytes, exactly as expected`**. Two
+numbers describing one file, disagreeing on screen, in a product whose argument
+is that it tells you the truth about bytes.
+
+**`Wording::sizePhrase()` divides by 1000 and keeps `KB`/`MB`/`GB`/`TB`.** The
+rounding picks the unit rather than the other way round: 999,950 bytes is
+999.95 KB, which *prints* as `1000 KB`, and reads `1.0 MB`.
+
+Rejected: **labelling it `MiB`.** Equally true, and it fixes the wrong half — the
+exact byte count is what a reader reconciles the column against, and `3.0 MB`
+reconciles by eye where `2.9 MiB` needs powers of two explained first. It is also
+a third character in the 52 px this ADR budgeted.
+
+Rejected: **keeping binary maths and putting the exact bytes in a tooltip.** A
+hover for the truth, in a keyboard-first tool, and it leaves the disagreement on
+screen for anyone who does not hover.
+
+### Consequences
+
+- A 40-character refusal now goes at 5.2 s rather than 6 s. Deliberate: the rule
+  is the sentence's length, in both directions.
+- **The pane's free-space figure is decimal too**, since it goes through the same
+  function. `33 GB free` now means 33 × 10⁹ and will read about 7% larger than
+  `df -h` says for the same filesystem. That is the price of agreeing with the
+  daemon rather than with `df`.
+- Anything that prints a size must go through `Wording::sizePhrase()`, and
+  anything that writes a notice must let `setNotice()` set the interval.
+  `prototypes/PaneListing.qml` still carries the original 1024 copy; it is a
+  frozen artifact, not a second implementation to keep in step.
+- Both rules are arithmetic, so both are checked by `qmltestrunner` rather than
+  by looking (`tests/qml/tst_wording.qml`). The lifetime case builds its
+  sentence with `copyPhrase()` rather than quoting one, so the timing claim
+  cannot drift from the sentence it is about.

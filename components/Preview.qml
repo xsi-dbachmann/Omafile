@@ -70,7 +70,7 @@ Rectangle {
     }
   }
 
-  TapHandler { onSingleTapped: sheet.open = false }
+  InputShield { onTapped: sheet.open = false }
 
   Text {
     id: title

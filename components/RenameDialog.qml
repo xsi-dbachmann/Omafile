@@ -39,7 +39,7 @@ Rectangle {
   function fail(message) { errorText = message; visible = true; field.forceActiveFocus() }
   function done() { visible = false; errorText = "" }
 
-  TapHandler { onSingleTapped: {} }
+  InputShield {}
 
   Rectangle {
     anchors.centerIn: parent

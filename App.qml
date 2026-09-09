@@ -127,6 +127,28 @@ Item {
   /// Which pane a drag started from, so a drop knows the direction. Dropping
   /// onto the pane you dragged from does nothing.
   property int dragFrom: -1
+  /// What the drag is carrying, captured **once** when it starts.
+  ///
+  /// Not recomputed per pointer move: `DirPane::selectedPaths()` walks the whole
+  /// `FolderListModel`, and doing that on every frame of a drag over a large
+  /// directory is precisely the UI-thread cost ticket 12 measured and forbade.
+  /// Capturing also makes the label and the Job the *same* list rather than two
+  /// walks that agree by luck — `dropOnto` reads these, not the pane.
+  property var dragPaths: []
+  property bool dragHadFolder: false
+  /// The folder a release would land in, or "" when the pointer is not over a
+  /// pane that would accept it. Empty is a normal state on the way somewhere,
+  /// not a refusal.
+  property string dragDest: ""
+  property real dragPointerX: 0
+  property real dragPointerY: 0
+  /// The drag ghost stays hidden until the pointer has actually reported a
+  /// position. `dragStarted` and the first `dragMoved` are separate events, and
+  /// drawing between them puts the label in the window's top-left corner for a
+  /// frame.
+  property bool dragPointerSeen: false
+  readonly property var dragLabel: root.wording.dragPhrase(root.dragPaths, root.dragHadFolder,
+                                                           root.dragDest)
   /// A transfer waiting on a conflict answer: what to send once we have one.
   /// One slot, and now one at a time — see beginTransfer.
   property var pendingTransfer: null
@@ -250,11 +272,20 @@ Item {
     // has to go away, or the last thing you did is still on screen an hour
     // later, asserted in the present tense.
     if (root.notice === "") noticeLife.stop()
-    else noticeLife.restart()
+    else {
+      // How long it has depends on how much there is to read (issue 19 item 3).
+      // Set before the restart, because a Timer reads `interval` when it starts.
+      noticeLife.interval = root.wording.noticeLifeMs(root.notice)
+      noticeLife.restart()
+    }
   }
 
   Timer {
     id: noticeLife
+    // Overwritten on every write by setNotice(), which scales it to the length
+    // of the sentence (`Wording::noticeLifeMs()`). This literal is only what a
+    // Timer needs to be constructible, and is the value a 50-character notice
+    // still gets.
     interval: 6000
     // Through setNotice() like every other write. Clearing the two properties
     // by hand here made this the one exception to the rule the property's own
@@ -391,6 +422,12 @@ Item {
   /// enough call sites read better as `root.folderName(...)` than as a reach
   /// through an id to justify the one exception.
   property Wording wording: Wording {}
+
+  /// The other QtQuick-only helper, here for the drag ghost's one glyph. The
+  /// rows get theirs from `FileRow`'s own instance; a second one costs nothing
+  /// and keeps the lookup table in the single place `tests/qml/tst_filekind.qml`
+  /// checks it.
+  property FileKind fileKinds: FileKind {}
 
   function folderName(dirPath) { return root.wording.folderName(dirPath) }
 
@@ -681,15 +718,39 @@ Item {
     return -1
   }
 
+  /// Read the pane's selection the once, at the moment the drag becomes a drag.
+  function beginDrag(paneIndex) {
+    var from = paneIndex === 0 ? leftPane : rightPane
+    root.dragFrom = paneIndex
+    root.dragPaths = from.selectedPaths()
+    root.dragHadFolder = from.containsDir
+    root.dragDest = ""
+    root.dragPointerSeen = false
+  }
+
   function updateDropTarget(sx, sy) {
     var over = paneAt(sx, sy)
-    leftPane.dropTarget = (over === 0 && root.dragFrom === 1)
-    rightPane.dropTarget = (over === 1 && root.dragFrom === 0)
+    root.dragPointerX = sx
+    root.dragPointerY = sy
+    root.dragPointerSeen = true
+    // Over a pane, from a drag, and not the pane it came from.
+    var accepts = over !== -1 && root.dragFrom !== -1 && over !== root.dragFrom
+    root.dragDest = accepts ? root.folderName((over === 0 ? leftPane : rightPane).dir) : ""
+    // The wash and the label answer to the same sentence, read from the label
+    // rather than re-derived here. Watched on screen 2026-09-09: dragging a
+    // folder lit the destination pane while the label under the cursor was
+    // saying folders are not transferred — a target armed for something that
+    // will do nothing, which is rank 7 in its plainest form, and two places
+    // deciding one fact, which is how the other nine got in.
+    var lit = accepts && !root.dragLabel.blocked
+    leftPane.dropTarget = lit && over === 0
+    rightPane.dropTarget = lit && over === 1
   }
 
   function releaseDrag(sx, sy) {
     leftPane.dropTarget = false
     rightPane.dropTarget = false
+    root.dragPointerSeen = false
     dropOnto(paneAt(sx, sy))
   }
 
@@ -767,13 +828,19 @@ Item {
     }
     var from = root.dragFrom === 0 ? leftPane : rightPane
     var to = paneIndex === 0 ? leftPane : rightPane
-    var paths = from.selectedPaths()
+    // What the ghost promised, not a second walk of the model. Two computations
+    // of "the files this drag carries" is one place taught and its reader left
+    // alone — this project's signature defect, and there is no reason to invite
+    // it when the answer was already worked out at `beginDrag`.
+    var paths = root.dragPaths
+    var hadFolder = root.dragHadFolder
     root.dragFrom = -1
     if (paths.length === 0) {
       // A drag selects the row it started on, so an empty list here means
-      // the drag began on a folder.
-      root.setNotice(from.containsDir ? "Folders are not transferred in this version"
-                                      : "Nothing to copy", "warn")
+      // the drag began on a folder. The ghost has been saying so since the
+      // gesture began; this is the same sentence, kept for the release.
+      root.setNotice(hadFolder ? "Folders are not transferred in this version"
+                               : "Nothing to copy", "warn")
       return
     }
     // States the rule, in the neutral role: the accent is for outcomes, and
@@ -839,6 +906,129 @@ Item {
       } else {
         root.setNotice("No folder at " + pathCheck.candidate, "bad")
       }
+    }
+  }
+
+  /// What `systemctl --user is-enabled omafiled.socket` last answered, trimmed,
+  /// or "" before it has been asked. Issue 38.
+  ///
+  /// One command separates all three first-run situations, which is why there
+  /// is no second check for the binary: the socket unit ships in the same
+  /// package, so `not-found` **is** "not installed". Verified on this machine
+  /// rather than assumed — a missing unit answers `not-found` with status 4.
+  /// A `test -x /usr/bin/omafiled` beside this would be a second way to ask one
+  /// question, and two gates that must agree is the defect this project has now
+  /// found nine times.
+  property string socketState: ""
+
+  /// Where the plugin is installed, which is where its `packaging/` is. Omarchy
+  /// puts a plugin at `~/.config/omarchy/plugins/<id>`, and `link-plugin.sh`
+  /// makes the same path a symlink for development — so `cd` through it works
+  /// either way and the copied command is true on a user's machine and on this
+  /// one.
+  readonly property string pluginDir:
+    root.homeDir + "/.config/omarchy/plugins/" + root.pluginId
+
+  readonly property var firstRun: root.wording.firstRunHelp(root.socketState, root.pluginDir)
+
+  /// The transfer panel's daemon line, and the command its chip copies, decided
+  /// **once**.
+  ///
+  /// These were briefly two parallel ternaries — one for the sentence, one for
+  /// the command — and they disagreed on the first screen they were watched on:
+  /// the note said the daemon was connected and merely quiet, while the chip
+  /// beside it offered `makepkg -si` to install the daemon that was plainly
+  /// already there. One armed control, nothing useful behind it, which is the
+  /// rank 7 rule; and one fact decided in two places, which is how the other
+  /// nine got in. So there is one expression and the panel reads both halves
+  /// off it.
+  ///
+  /// Only the last branch has anything to paste. A version mismatch and a quiet
+  /// daemon are both explained by their sentence, and neither is fixed by a
+  /// command this window could name.
+  /// Whether a layer that must be answered is on screen.
+  ///
+  /// Issue 39, and the reason this exists rather than the shield doing it all:
+  /// `InputShield` stops a *press* reaching what is behind it, which covers
+  /// every MouseArea in this window — the scrollbar, the divider grip, the
+  /// sidebar. It cannot stop `FileRow`'s `DragHandler`, and two attempts to
+  /// make it were watched failing on screen with both handlers instrumented:
+  ///
+  ///   * A full-surface `MouseArea` shields nothing from a handler. Qt 6 offers
+  ///     a press to **every item's pointer handlers first**, front to back, and
+  ///     only then to the items themselves. A MouseArea is an item.
+  ///   * A `TapHandler` with `gesturePolicy: WithinBounds` takes the exclusive
+  ///     grab on press — the log shows it taking one — and then **gives it up
+  ///     the instant the point moves**, which is precisely when a drag begins.
+  ///     A tap handler cannot hold a drag; that is its job description. The
+  ///     `DragHandler` below, holding a passive grab all along, takes over.
+  ///   * A `DragHandler` on the shield does not win either: both it and the
+  ///     row's went active in the same gesture.
+  ///
+  /// `enabled` is not a grab race. A disabled item and everything under it
+  /// receive no input at all, handlers included, which is what Qt's own modal
+  /// popups rely on. So the panes — the only place beneath an overlay where a
+  /// pointer *handler* lives — are disabled while one is up.
+  /// `contextMenu` is in the list because it was watched doing it: with the menu
+  /// open, a drag on a row behind it copied a file. Its scrim is a MouseArea and
+  /// by the reasoning above a MouseArea cannot stop a handler. A menu is not a
+  /// modal, but a drag running behind one is not "click away to dismiss" either
+  /// — the scrim eats the click, so the gesture is invisible where it lands and
+  /// effective where it does not.
+  ///
+  /// `GoMenu` is the same fault and is NOT here, because it lives inside the
+  /// pane: disabling the pane would disable the menu with it. `DirPane` disables
+  /// its own list instead.
+  readonly property bool modalOpen: conflictDialog.visible || renameDialog.visible
+                                    || confirmDelete.visible
+                                    || previewSheet.open || shortcutSheet.open
+                                    || contextMenu.visible
+
+  readonly property var daemonBanner: {
+    if (daemon.canTransfer)
+      return { note: "omafiled " + daemon.daemonVersion + " · protocol ok", command: "" }
+    if (daemon.incompatible !== "")
+      return { note: daemon.incompatible, command: "" }
+    if (daemon.attached)
+      return { note: "omafiled is connected but has gone quiet — nothing was lost;"
+                     + " it is still being asked",
+               command: "" }
+    // Issue 38. This used to be one sentence naming both first-run commands for
+    // all three of the situations it can mean, and the two halves of first run
+    // have completely different privilege profiles, so saying them together
+    // said neither well. `systemctl --user is-enabled` tells them apart, and
+    // the sentence and command come from `Wording::firstRunHelp()`, where they
+    // are tested rather than eyeballed.
+    //
+    // `makepkg -si` rather than `yay -S omafiled`: the AUR closed new account
+    // registration on 2026-09-09 with no stated date, so that package cannot
+    // exist yet and naming it would be telling the user to run a command that
+    // fails. The PKGBUILD lives in this repo (ADR 0006), which is what makes
+    // the AUR a convenience rather than a requirement.
+    return root.firstRun
+  }
+
+  Process {
+    id: socketCheck
+    running: false
+    command: ["systemctl", "--user", "is-enabled", "omafiled.socket"]
+    // Decided from the word, not the exit status: systemd distinguishes
+    // `not-found`, `disabled` and `masked` in the text while giving them
+    // exit codes that would have to be memorised to be read.
+    stdout: StdioCollector {
+      onStreamFinished: root.socketState = String(this.text).trim()
+    }
+  }
+
+  Component.onCompleted: socketCheck.running = true
+
+  Connections {
+    target: daemon
+    // Ask again whenever the daemon stops being usable, so a diagnosis from
+    // startup does not outlive the thing it described — the socket can be
+    // enabled, or masked, while the window is open.
+    function onCanTransferChanged() {
+      if (!daemon.canTransfer) socketCheck.running = true
     }
   }
 
@@ -1146,6 +1336,9 @@ Item {
 
       DirPane {
         id: leftPane
+        // Issue 39. The one place beneath an overlay where a pointer HANDLER
+        // lives, and therefore the one place a shield cannot cover.
+        enabled: !root.modalOpen
         homePath: root.homeDir
         showIcons: root.showIcons
         onSpaceWanted: function (path) { daemon.askSpace(path) }
@@ -1166,7 +1359,7 @@ Item {
         mounts: sidebar.mounts
         onActivated: { root.activePane = 0; browser.forceActiveFocus() }
         onContextRequested: function (gx, gy) { contextMenu.popupAt(gx, gy, leftPane.selectedFileCount(), leftPane.containsDir) }
-        onDragBegan: root.dragFrom = 0
+        onDragBegan: root.beginDrag(0)
         onDragReleased: function (sx, sy) { root.releaseDrag(sx, sy) }
         onDragMoved: function (sx, sy) { root.updateDropTarget(sx, sy) }
       }
@@ -1211,6 +1404,7 @@ Item {
 
       DirPane {
         id: rightPane
+        enabled: !root.modalOpen
         homePath: root.homeDir
         showIcons: root.showIcons
         onSpaceWanted: function (path) { daemon.askSpace(path) }
@@ -1227,9 +1421,27 @@ Item {
         mounts: sidebar.mounts
         onActivated: { root.activePane = 1; browser.forceActiveFocus() }
         onContextRequested: function (gx, gy) { contextMenu.popupAt(gx, gy, rightPane.selectedFileCount(), rightPane.containsDir) }
-        onDragBegan: root.dragFrom = 1
+        onDragBegan: root.beginDrag(1)
         onDragReleased: function (sx, sy) { root.releaseDrag(sx, sy) }
         onDragMoved: function (sx, sy) { root.updateDropTarget(sx, sy) }
+      }
+
+      // Above both panes (the drop wash is z: 40 inside a pane) and below the
+      // dialogs, which cannot be open while a drag is in flight anyway.
+      DragGhost {
+        id: dragGhost
+        z: 90
+        visible: root.dragPointerSeen && root.dragFrom !== -1
+        pointerX: root.dragPointerX
+        pointerY: root.dragPointerY
+        label: root.dragLabel.text
+        blocked: root.dragLabel.blocked
+        // Follows Ctrl+I: a window with icons turned off should not grow one
+        // under the cursor. One file only — a single file's icon standing in
+        // for four would name the wrong one.
+        icon: root.showIcons && root.dragPaths.length === 1
+              ? root.fileKinds.iconFor(String(root.dragPaths[0]).split("/").pop(), false)
+              : ""
       }
 
       Shortcuts { id: shortcutSheet }
@@ -1294,26 +1506,14 @@ Item {
         onHelpRequested: shortcutSheet.open = true
         onDismissRequested: function (jobId) { root.dismissJob(jobId) }
         daemonLive: daemon.canTransfer
-        daemonNote: daemon.canTransfer
-          ? ("omafiled " + daemon.daemonVersion + " · protocol ok")
-          : (daemon.incompatible !== ""
-             ? daemon.incompatible
-             : daemon.attached
-               ? "omafiled is connected but has gone quiet — nothing was lost; it is still being asked"
-               // Both halves of getting there, because the socket unit is not
-               // enabled by installing it (a package may not enable its own
-               // units) and either step alone leaves this same message on
-               // screen.
-               //
-               // `makepkg -si` rather than `yay -S omafiled`: the AUR closed
-               // new account registration on 2026-09-09 with no stated date,
-               // so that package cannot exist yet and naming it would be
-               // telling the user to run a command that fails. The PKGBUILD
-               // lives in this repo (ADR 0006), which is what makes the AUR a
-               // convenience rather than a requirement — `makepkg` installs
-               // exactly the same binary and units. One line changes back when
-               // registration reopens.
-               : "omafiled not running — makepkg -si in packaging/, then: systemctl --user enable --now omafiled.socket")
+        daemonNote: root.daemonBanner.note
+        daemonCommand: root.daemonBanner.command
+        onCopyCommandRequested: {
+          Quickshell.clipboardText = root.daemonBanner.command
+          // Names what was copied. A clipboard write is invisible, and "Copied"
+          // alone is also what a finished file copy says in this same window.
+          root.setNotice("Command copied — paste it in a terminal", "ok")
+        }
       }
 
       // Keyboard-first, and handled at the window rather than in the panes:
@@ -1511,7 +1711,6 @@ Item {
       DeleteConfirm {
         id: confirmDelete
         anchors.fill: parent
-        z: 100
         onVisibleChanged: if (!visible) browser.forceActiveFocus()
         onConfirmed: root.performPendingDelete()
         onCancelled: {

@@ -23,5 +23,9 @@ to express it. ADR 0003 supersedes the project's original always-on verification
 decision, and carries a correction: the tiers describe copies, so a
 same-filesystem move reports `Moved` rather than a tier.
 
+ADR 0014 carries a 2026-09-09 amendment (issue 19): a notice lives as long as
+its sentence, and a size is decimal so the column and the daemon's exact byte
+count describe one file without disagreeing.
+
 ⚠️ **ADR 0007 requires a security review before shipping** — it is the product's
 one privileged component and it writes `/etc/fstab`.

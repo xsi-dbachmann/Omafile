@@ -65,7 +65,10 @@ Rectangle {
   }
   function done() { visible = false }
 
-  TapHandler { onSingleTapped: {} }
+  // Swallows the click. Answering this dialog is deliberate (issue 18), so
+  // there is nothing to connect: a press on the dim area does nothing, and
+  // now genuinely reaches nothing either (issue 39).
+  InputShield {}
 
   Item {
     id: keys

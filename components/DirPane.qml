@@ -21,6 +21,9 @@ Rectangle {
   property var places: []
   property var mounts: []
   property alias count: folderModel.count
+  /// The pane's arithmetic-bearing sentences. `Wording` imports QtQuick and
+  /// nothing else, which is what lets `qmltestrunner` hold it (issue 26).
+  property Wording wording: Wording {}
   /// The keyboard cursor. Exposed so the window can drive a pane without
   /// depending on where Qt happens to have put focus.
   property alias cursorIndex: list.currentIndex
@@ -224,14 +227,18 @@ Rectangle {
   color: pane.active ? Qt.lighter(Color.background, 1.45)
                      : Qt.darker(Color.background, 1.25)
 
+  /// A file's size, as `Wording::sizePhrase()` decides it: decimal, so the
+  /// number here and the daemon's exact byte count reconcile in the head
+  /// (issue 19 item 4b). This divided by 1024 and labelled the answer `MB`,
+  /// and a 3,000,000-byte file therefore read `2.9 MB` in the column beside a
+  /// panel row saying `3000000 bytes, exactly as expected`.
+  ///
+  /// Kept as a function on the pane because its callers ask the pane —
+  /// `App.qml`'s not-enough-room notice asks `srcPane.humanSize(need)`, and
+  /// the free-space label below asks for its own. The name stays; the
+  /// arithmetic moved somewhere a headless runner can check it.
   function humanSize(bytes) {
-    var b = Number(bytes)
-    if (!isFinite(b) || b < 0) return ""
-    if (b < 1024) return b + " B"
-    var units = ["KB", "MB", "GB", "TB"]
-    var i = -1
-    do { b = b / 1024; i++ } while (b >= 1024 && i < units.length - 1)
-    return b.toFixed(b < 10 ? 1 : 0) + " " + units[i]
+    return pane.wording.sizePhrase(bytes)
   }
 
   /// When the file last changed, worded for a column 52px wide.
@@ -805,6 +812,12 @@ Rectangle {
 
   ListView {
     id: list
+    // Issue 39, the in-pane case. GoMenu's scrim is a MouseArea, which stops a
+    // click on a row below and cannot stop a drag — so the rows themselves stop
+    // taking input while the menu is up. The menu is a child of the pane, so
+    // this is the list rather than the pane: disabling the pane would disable
+    // the menu asking the question.
+    enabled: !goMenu.open
     anchors { top: filterBar.bottom; bottom: parent.bottom; left: parent.left; right: parent.right }
     clip: true
     model: folderModel

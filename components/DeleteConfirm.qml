@@ -41,7 +41,15 @@ Rectangle {
 
   // Swallow clicks so nothing behind the scrim can be touched while a
   // destructive question is on screen.
-  TapHandler { onSingleTapped: {} }
+  // Declared here rather than at the use site, like every other stacked layer
+  // in this repo. It had been set only in App.qml, which is one fact in two
+  // places -- and it was also the reason the issue 39 lint rule could not see
+  // this file, since that rule keys on a component declaring its own z.
+  z: 100
+
+  // Swallows the click: the one action here that destroys data must not be
+  // dismissable by a stray press, in either direction.
+  InputShield {}
 
   Item {
     id: focusCatcher

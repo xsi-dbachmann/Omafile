@@ -246,3 +246,57 @@ compile in a file browser's startup path.
 - Browse-only was chosen over refusing to open (harsh, makes a partial product
   useless) and over failing at transfer time (surfaces the problem after files
   are already chosen).
+
+## The plugin copies the command; it still never runs it (2026-09-09)
+
+Issue 38, from the first hands-on session: *"it is strange for user that he needs
+to run a daemon by hand, bad ux"*. The complaint is fair about first run and
+wrong about steady state — nobody runs the daemon by hand, the socket unit
+starts it (ADR 0005). So the question is only how few steps first run takes.
+
+The two steps have **completely different privilege profiles**, and had been
+discussed as one problem:
+
+- `makepkg -si` writes `/usr/bin` and `/usr/lib/systemd/user`. Needs root. A
+  button for it means a privileged helper, which is ADR 0007's territory and
+  deferred there for its own reasons.
+- `systemctl --user enable --now omafiled.socket` touches only the user's own
+  systemd instance. No sudo, no polkit, no tty. **A QML `Process` could do this
+  today**, and the "never installs" rule was reasoned about `yay -S`, which
+  needs all three.
+
+**Decided: the plugin puts the command on the clipboard, and runs nothing.**
+
+"The plugin instructs, never installs" therefore stands **unamended**. This is
+not an exception carved out of it — a copied command *is* the instruction, and
+the user still runs it, still sees what it printed, and still decides. What gets
+removed is transcription, which is the friction that actually exists: the
+installed path makes the honest command
+`cd ~/.config/omarchy/plugins/io.github.xsi-dbachmann.omafile/packaging && makepkg -si && …`,
+far too long to retype and trivial to paste.
+
+Rejected: **a button that runs `systemctl --user enable --now`.** Not on
+privilege grounds — there is none to speak of — but because the win is small and
+the cost is a bright line becoming a judgment call. Every future "this one is
+harmless too" would then be argued against a rule that had already bent once. A
+copied command that fails also teaches the user something; a button that fails
+silently does not.
+
+Rejected again, for the record: shipping the binary in the plugin repo
+(`omarchy-plugin-update` shows a `git diff`, which a binary hollows out), and
+the plugin writing its own units around a binary it compiled (a Rust toolchain
+in a file browser's startup path — ticket 11).
+
+**One check, not two.** The plugin used to know only "cannot connect" and said
+one sentence for three different situations. It now runs
+`systemctl --user is-enabled omafiled.socket` and tells them apart: `not-found`
+(the package is not installed), `disabled`/`masked` (installed, socket not
+enabled), and any affirmative (enabled, and something else is wrong). There is
+deliberately **no** second `test -x /usr/bin/omafiled`: the unit file ships
+inside the package, so `not-found` already *is* "not installed", and a second
+way to ask one question is two gates that must be kept in agreement — this
+project's signature defect. Checked rather than assumed: a missing unit answers
+`not-found` with status 4.
+
+The sentences and the commands live in `Wording::firstRunHelp()`, tested by
+`qmltestrunner`, for the reason that file exists at all.

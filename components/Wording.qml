@@ -135,4 +135,153 @@ QtObject {
                    + (info.tier ? " · " + info.tier : ""),
              role: "ok" }
   }
+
+  /// The label that follows the cursor during a drag (issue 19 item 2).
+  ///
+  /// ADR 0012 makes a drag *always* a copy, and until this existed that rule was
+  /// stated only in the notice that appears **after** the drop — by which time
+  /// the Job has been asked for and the mind that might have been changed has
+  /// nothing left to change. The label is the rule's only chance to be read in
+  /// time.
+  ///
+  /// `paths` is what would actually land: `DirPane::selectedPaths()` drops
+  /// directories, so a selection of two files and a folder copies two. Counting
+  /// the selection instead would promise three, which is this project's
+  /// signature defect wearing a new hat — so `hadFolder` says what is being left
+  /// behind rather than letting the number quietly disagree with the screen.
+  ///
+  /// `blocked` is for a drag that can do nothing *wherever* it is dropped, which
+  /// is a different thing from one that is merely not aimed at a pane yet.
+  function dragPhrase(paths, hadFolder, destName) {
+    var n = paths.length
+    if (n === 0)
+      return { text: hadFolder ? "Folders are not transferred in this version"
+                               : "Nothing to copy",
+               blocked: true }
+    var what = n === 1 ? String(paths[0]).split("/").pop() : n + " files"
+    return { text: "Copy " + what
+                   + (destName !== "" ? " to " + destName : "")
+                   + (hadFolder ? " — folders are left behind" : ""),
+             blocked: false }
+  }
+
+  /// What to say, and what to put on the clipboard, when there is no daemon
+  /// to talk to (issue 38).
+  ///
+  /// The complaint was *"it is strange for user that he needs to run a daemon
+  /// by hand, bad ux"*, and the useful part of it is narrower than it sounds:
+  /// in normal operation nobody runs a daemon by hand, because the socket unit
+  /// starts it (ADR 0005). What the session actually hit was **first run**, and
+  /// first run is two commands with completely different privilege profiles —
+  /// one needs root to put a binary in a system path, the other touches only
+  /// the user's own systemd instance.
+  ///
+  /// The plugin used to know none of that. It knew "cannot connect", and said
+  /// one sentence naming both commands for all three situations.
+  ///
+  /// `state` is `systemctl --user is-enabled omafiled.socket`, trimmed, and it
+  /// separates all three by itself. `not-found` means the unit file is absent,
+  /// which IS "the package is not installed" because the unit ships inside it —
+  /// so there is deliberately no second `test -x /usr/bin/omafiled`. Two ways
+  /// to ask one question is two gates to keep in agreement, and this project
+  /// has found nine instances of one place taught and its reader left alone.
+  ///
+  /// **Nothing here runs anything.** The command is copied, not executed: the
+  /// friction worth removing is typing a long line correctly, not the decision
+  /// to run it, and a copied command that fails teaches the user something
+  /// where a button that silently fails does not. ADR 0006's "the plugin
+  /// instructs, never installs" therefore stands unamended — this is the
+  /// instruction, made pasteable.
+  function firstRunHelp(state, pluginDir) {
+    var s = String(state)
+    var enableNow = "systemctl --user enable --now omafiled.socket"
+    var bothHalves = "cd " + pluginDir + "/packaging && makepkg -si && " + enableNow
+
+    if (s === "not-found")
+      return { note: "omafiled is not installed — browsing only", command: bothHalves }
+
+    // systemd's affirmative answers, plural. Treating `static` or
+    // `enabled-runtime` as "not enabled" would offer a button that does
+    // nothing, which is the rank 7 rule this product keeps rediscovering.
+    if (s === "enabled" || s === "enabled-runtime" || s === "static" || s === "indirect"
+        || s === "alias" || s === "generated")
+      return { note: "omafiled's socket is enabled but nothing is answering",
+               // Diagnosis, not a fix. What is wrong is not known from here, and
+               // `restart` would be a guess wearing the clothes of advice.
+               command: "systemctl --user status omafiled.socket" }
+
+    // `enable` on a masked unit fails. Offering it anyway would make the
+    // product look broken instead of the unit.
+    if (s === "masked" || s === "masked-runtime")
+      return { note: "omafiled's socket is masked", command:
+               "systemctl --user unmask omafiled.socket && " + enableNow }
+
+    if (s !== "")
+      return { note: "omafiled is installed, but its socket is not enabled",
+               command: enableNow }
+
+    // Not asked yet, or `systemctl` said nothing at all. The sentence that was
+    // here before any of this existed: vague in every state, because it is
+    // correct in every state.
+    return { note: "omafiled not running — browsing only", command: bothHalves }
+  }
+
+  /// A byte count, in the units the panes label it with (issue 19 item 4b).
+  ///
+  /// **Decimal, deliberately.** The form this replaces divided by 1024 and
+  /// labelled the result `KB`/`MB`, so a 3,000,000-byte file rendered `2.9 MB`
+  /// in the pane while the transfer panel beside it read `3000000 bytes,
+  /// exactly as expected` — two numbers describing one file, disagreeing on
+  /// screen, in a product whose whole argument is that it tells you the truth
+  /// about bytes. Either half could have been fixed: `MiB` would have been just
+  /// as true. The maths moved instead, because the exact byte count is what a
+  /// reader reconciles this against, and `3.0 MB` reconciles by eye where
+  /// `2.9 MiB` needs a lesson in powers of two first — and a third character in
+  /// a 52px column (ADR 0014).
+  ///
+  /// Here rather than in `DirPane` because a division that decides what the
+  /// user believes about a file's size is arithmetic, and arithmetic is what
+  /// `qmltestrunner` can hold. The pane keeps `humanSize()`, the name its call
+  /// sites already use; this decides what it answers.
+  function sizePhrase(bytes) {
+    var b = Number(bytes)
+    if (!isFinite(b) || b < 0) return ""
+    if (b < 1000) return b + " B"
+    var units = ["KB", "MB", "GB", "TB"]
+    var i = -1
+    do { b = b / 1000; i++ } while (b >= 1000 && i < units.length - 1)
+    var digits = b < 10 ? 1 : 0
+    // 999,950 bytes is 999.95 KB, which rounds *for display* to `1000 KB` — a
+    // number the next unit up exists to say. The rounding is what the user
+    // reads, so the unit is chosen after it rather than before.
+    if (Number(b.toFixed(digits)) >= 1000 && i < units.length - 1) {
+      b = b / 1000
+      i++
+      digits = 1
+    }
+    return b.toFixed(digits) + " " + units[i]
+  }
+
+  /// How long a notice stays on screen, in milliseconds (issue 19 item 3).
+  ///
+  /// It was a flat 6000 for every string the bar writes. That constant was
+  /// tuned for *dismissal* — the defect it fixed was a present-tense sentence
+  /// that never cleared — and nothing ever tuned it for *reading*. The
+  /// completion notice is the longest sentence the product writes, and on
+  /// 2026-09-08 the first person to drive the UI could not finish it: *"message
+  /// disappeared shortly after, could not manage to get exact message read."*
+  ///
+  /// So the string's own length decides. ~80ms a character is about 150 words a
+  /// minute, which is reading-off-a-screen speed rather than prose speed. The
+  /// floor keeps a two-word refusal from flickering; the ceiling keeps the bar
+  /// from becoming the status line the timer exists to prevent. 50 characters
+  /// lands on exactly 6000, so the short notices the old constant was chosen
+  /// around are unchanged and only the long ones stay longer.
+  ///
+  /// The alternative was pausing on hover, which asks the reader to reach for
+  /// the mouse to finish a sentence — no help at all to the keyboard user this
+  /// product is for.
+  function noticeLifeMs(text) {
+    return Math.max(4000, Math.min(14000, 2000 + 80 * String(text || "").length))
+  }
 }

@@ -14,6 +14,10 @@ Rectangle {
   property var jobs: []
   property bool daemonLive: false
   property string daemonNote: ""
+  /// The command the note is talking about, or "" when there is nothing to
+  /// offer. Issue 38: the chip **copies** it, and never runs it — see
+  /// `Wording::firstRunHelp()` for why that is the whole of the decision.
+  property string daemonCommand: ""
 
   /// Issue 28: Job ids the daemon is safe to forget right now, computed by
   /// `App.qml` (which alone knows whether an undo is still waiting on one).
@@ -24,6 +28,7 @@ Rectangle {
   /// Asked for the shortcut sheet. The panel does not own it -- it is a layer
   /// over the whole window -- so it only says that somebody clicked.
   signal helpRequested()
+  signal copyCommandRequested()
   signal dismissRequested(string jobId)
 
   // One row, one Job. Named because three separate things measure against it:
@@ -104,15 +109,50 @@ Rectangle {
     Text {
       // Bounded against the title rather than left to overlap it: a protocol
       // mismatch puts a long sentence here, and this panel's whole complaint
-      // was text painting over other text.
+      // was text painting over other text. Now bounded against the chip on the
+      // other side too, for the same reason.
       anchors { verticalCenter: parent.verticalCenter
                 left: title.right; leftMargin: 16
-                right: parent.right; rightMargin: 16 }
+                right: copyChip.visible ? copyChip.left : parent.right
+                rightMargin: copyChip.visible ? 10 : 16 }
       horizontalAlignment: Text.AlignRight
       elide: Text.ElideRight
       text: panel.daemonNote
       color: panel.daemonLive ? Color.muted : Color.urgent
       font.pixelSize: 11
+    }
+
+    // Issue 38: the first-run instruction, made pasteable.
+    //
+    // It copies and never runs. The friction worth removing is transcribing a
+    // long command correctly -- the installed path makes it far too long to
+    // type -- and not the user's decision to run it. A copied command that
+    // fails tells them something; a button that silently fails does not. So
+    // ADR 0006's "the plugin instructs, never installs" needed no amendment:
+    // this IS the instruction.
+    Rectangle {
+      id: copyChip
+      anchors { verticalCenter: parent.verticalCenter; right: parent.right; rightMargin: 16 }
+      visible: !panel.daemonLive && panel.daemonCommand !== ""
+      width: chipText.implicitWidth + 16
+      height: 18
+      radius: 3
+      color: chipTap.pressed
+        ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
+        : (chipHover.hovered
+           ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
+           : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.08))
+
+      HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
+      TapHandler { id: chipTap; onSingleTapped: panel.copyCommandRequested() }
+
+      Text {
+        id: chipText
+        anchors.centerIn: parent
+        text: "copy command"
+        color: Color.foreground
+        font.pixelSize: 10
+      }
     }
   }
 

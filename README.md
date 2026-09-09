@@ -124,12 +124,19 @@ omarchy plugin add https://github.com/xsi-dbachmann/Omafile
 ```
 
 The engine is an Arch package built from this repository. Enabling its socket
-is a second step, because a package may not enable its own units:
+is a second step, because a package may not enable its own units — so it is one
+line rather than two, joined:
 
 ```bash
-cd packaging && makepkg -si
-systemctl --user enable --now omafiled.socket
+cd ~/.config/omarchy/plugins/io.github.xsi-dbachmann.omafile/packaging \
+  && makepkg -si \
+  && systemctl --user enable --now omafiled.socket
 ```
+
+You do not have to type that. Until the engine is there Omafile opens and
+browses normally, and its transfer bar says which of the two halves is missing
+and offers a **copy command** button that puts exactly the right line on your
+clipboard. It copies; it never runs anything (ADR 0006).
 
 > **Why build it rather than install a package?** The Omarchy plugin catalog
 > distributes the plugin, not the engine: `omarchy plugin add` runs no build
@@ -140,10 +147,11 @@ systemctl --user enable --now omafiled.socket
 > repository. See ADR 0006, including why the binary is deliberately not
 > committed to the plugin repo.
 
-Nothing is running after the first command. The socket is what listens; the
-daemon starts on the first connection and stays for the session. Until both
-steps are done Omafile opens and browses normally and says, in the transfer
-panel, exactly which command is missing — it never installs anything itself.
+Nothing is running once that finishes, and that is correct. The socket is what
+listens; the daemon starts on the first connection and stays for the session.
+Until both halves are in place Omafile opens and browses normally and names, in
+the transfer panel, exactly which half is missing — it never installs anything
+itself.
 
 `packaging/` holds the `PKGBUILD` and the two units, so what lands on a machine
 is reviewable as text in the same diff as the code.

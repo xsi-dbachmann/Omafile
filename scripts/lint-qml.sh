@@ -71,6 +71,55 @@ if [[ -n $raw_selection$literal_dir ]]; then
   exit 1
 fi
 
+# Issue 39 -- a stacked layer's input guard must be a MouseArea, not a TapHandler.
+#
+# All five overlays swallowed input with `TapHandler { onSingleTapped: ... }` at
+# the root, and Shortcuts.qml even claimed in a comment that this meant "a stray
+# press while the sheet is up cannot land on a file row underneath it". It does
+# not. A TapHandler takes only a PASSIVE grab on press, so delivery continues to
+# items below -- and a `DragHandler` down there takes the press quite happily.
+#
+# Watched on 2026-09-09: with the conflict dialog open, a drag on the pane behind
+# it ran. `beginTransfer` refused the second transfer ("one at a time"), so the
+# guard held, but `pane.activated()` fired on the way and App.qml answers that
+# with `browser.forceActiveFocus()` -- so the dialog lost the keyboard and
+# stopped answering Escape while still saying "Escape cancels".
+#
+# A MouseArea does not fix it either, and that was watched failing too: Qt 6
+# offers a press to every item's pointer HANDLERS first, front to back, and only
+# then to the items, so a DragHandler below is served before any MouseArea above
+# it. Neither does a TapHandler with `gesturePolicy: WithinBounds`, which takes
+# the exclusive grab and then drops it the instant the point moves -- which is
+# when a drag begins. `components/InputShield.qml` carries the measurements.
+#
+# What stops a handler is `enabled`, and App.qml's `modalOpen` is where that
+# lives. InputShield is still required here because it is what stops everything
+# that is NOT a handler -- every MouseArea beneath, and hover, and the wheel.
+#
+# The scan is structural: a TapHandler at brace depth 1 is a direct child of the
+# file's ROOT item, and therefore covers the whole component. That alone is
+# fine -- FileRow is a row-sized tap target and legitimately does it. It is only
+# a hazard when the component is a STACKED layer, which is what a root-level
+# `z:` declares. So both conditions are required, which is why ContextMenu's
+# per-row handlers (depth > 1) and FileRow's (no root z) do not trip it.
+bad_shield="$(awk '
+  FILENAME ~ /InputShield\.qml$/ { next }
+  FNR == 1 { depth = 0; rootz = 0; hits = "" }
+  {
+    if (depth == 1 && $0 ~ /^  z: [0-9]+/) rootz = 1
+    if (depth == 1 && $0 ~ /TapHandler[[:space:]]*\{/) hits = hits FILENAME ":" FNR ": " $0 "\n"
+    n = gsub(/\{/, "{"); m = gsub(/\}/, "}"); depth += n - m
+  }
+  ENDFILE { if (rootz && hits != "") printf "%s", hits }
+' App.qml components/*.qml)"
+if [[ -n $bad_shield ]]; then
+  printf '%s\n' "$bad_shield"
+  printf 'lint-qml: a stacked layer guards its surface with a TapHandler (issue 39).\n' >&2
+  printf 'lint-qml: a TapHandler takes a passive grab, so a DragHandler underneath still gets the press.\n' >&2
+  printf 'lint-qml: use InputShield, which is a MouseArea and takes an exclusive one.\n' >&2
+  exit 1
+fi
+
 # Every _send's return must be checked.
 #
 # DaemonClient's senders return the request id, or **-1 if nothing was sent**,

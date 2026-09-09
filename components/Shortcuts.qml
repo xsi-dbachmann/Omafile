@@ -26,8 +26,10 @@ Rectangle {
   z: 200
 
   // Swallows every click, so a stray press while the sheet is up cannot land
-  // on a file row underneath it.
-  TapHandler { onSingleTapped: sheet.open = false }
+  // on a file row underneath it. That claim was false for two months -- a
+  // TapHandler does not stop a drag below it -- and InputShield is what
+  // finally makes it true (issue 39).
+  InputShield { onTapped: sheet.open = false }
 
   Column {
     anchors.centerIn: parent
