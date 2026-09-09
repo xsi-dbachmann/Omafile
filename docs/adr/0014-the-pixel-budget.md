@@ -68,7 +68,9 @@ separates "what you just did" from the control you did it with.
 clipped-filename complaint directly and permanently, and it makes every later
 width question the user's to settle rather than ours.
 
-It persists nothing. There is no home for settings yet (see STATE.md, "Not
+It persists nothing of the layout. (Settings did later get a home —
+`components/Settings.qml` writes `$XDG_CONFIG_HOME/omafile/settings.json` — but
+pane widths are deliberately not among them; see "Not
 done"), and inventing one here would be a second decision smuggled in behind the
 first.
 

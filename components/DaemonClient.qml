@@ -274,7 +274,7 @@ Item {
   /// up by a stalling share — had its perfectly good connection thrown away,
   /// and with it every reply still in flight on it.
   ///
-  /// Measured 2026-09-08 with `scripts/stallproxy.py` holding the daemon's
+  /// Measured 2026-09-08 with a stalling proxy holding the daemon's
   /// traffic for eight seconds: at ~5.3 s the plugin rebuilt the socket, and
   /// the daemon's answer — a completed undo — was flushed to a connection
   /// nobody was reading (`BrokenPipeError` in the proxy log). The window had

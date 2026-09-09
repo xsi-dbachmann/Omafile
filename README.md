@@ -165,8 +165,9 @@ that a checksum mismatch is *detected*, that a failed verification leaves no
 file at the destination and no temp file behind, and that the journal records
 nothing about finished work.
 
-Planning lives in `.scratch/omafile-v1/` — `map.md` is the index, `issues/` the
-open decisions, `research/` the findings behind them.
+The decisions behind all of this are in `docs/adr/` — fourteen of them, each
+with the measurement that settled it. The planning record they came from is kept
+in a private repository; nothing in it is needed to read, build or run Omafile.
 
 ## Development install
 

@@ -32,7 +32,7 @@ Item {
 
   /// 0 = left, 1 = right. The inactive pane is the destination.
   property int activePane: 0
-  /// Persisted (issue: STATE.md's unpersisted checksum default) — see
+  /// Persisted — the checksum default used to reset every session; see
   /// `components/Settings.qml`. An alias, not a copy: every write here is a
   /// write there, so nothing has to remember to save it.
   property alias checksum: settings.checksum
@@ -61,7 +61,7 @@ Item {
   /// clipped filename — widen that pane — was impossible.
   ///
   /// Deliberately not persisted. A panel-only plugin has no home for settings
-  /// yet (STATE.md), and inventing one here would smuggle a second decision in
+  /// yet, and inventing one here would smuggle a second decision in
   /// behind this one.
   property real sidebarWidth: 190
   property real splitFraction: 0.5

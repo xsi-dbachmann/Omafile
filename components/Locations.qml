@@ -23,7 +23,7 @@ Rectangle {
   property var mounts: []
 
   // Where the panes have actually been this session. Nothing about a session
-  // outlives it here (STATE.md), so this is a list in memory, not a setting.
+  // outlives it here, so this is a list in memory, not a setting.
   property var recent: []
 
   // Below this the sidebar cannot show seven places *and* the shares, and the

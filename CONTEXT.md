@@ -2,7 +2,7 @@
 
 The vocabulary Omafile is designed and discussed in. Glossary only: no
 implementation details, no decisions. Decisions live in `docs/adr/`; open
-questions live in `.scratch/omafile-v1/`.
+questions are kept in a private planning repository.
 
 ## Job
 

@@ -6,7 +6,7 @@ import Quickshell.Io
 
 // The one setting a panel-only plugin has any business persisting.
 //
-// STATE.md flagged this since before 2026-09-08: the checksum default reset
+// Flagged since before 2026-08: the checksum default reset
 // every session because nothing said where a panel-only plugin's settings
 // should live. Here: `$XDG_CONFIG_HOME/omafile/settings.json` (falling back to
 // `~/.config`), written by the plugin directly — this is a fact about how the
@@ -16,7 +16,7 @@ import Quickshell.Io
 // *preference* is not finished work).
 //
 // Never under `~/.config/omarchy/plugins/`: a write there tears down every
-// plugin (see STATE.md's "The split is not stylistic"), which is exactly why
+// plugin — the split is not stylistic — which is exactly why
 // this lives in its own directory instead.
 Item {
   id: settings

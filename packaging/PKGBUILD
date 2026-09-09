@@ -12,7 +12,7 @@
 # daemon/src/protocol.rs.
 
 pkgname=omafiled
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Omafile's transfer engine: every file is committed by atomic rename, or not at all"
 arch=('x86_64' 'aarch64')
